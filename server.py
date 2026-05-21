@@ -1600,6 +1600,21 @@ def api_syslog_hosts():
     return jsonify({"hosts": detection.get_syslog_hosts()})
 
 
+@app.route("/api/threat-intel")
+def api_threat_intel():
+    """Return threat intelligence feed status and observed IPs."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    try:
+        if not getattr(detection, "HAS_THREAT_INTEL", False):
+            return jsonify({"error": "threat intel module not available"}), 503
+        import threat_intel
+        status = threat_intel.get_threat_intel_status()
+        return jsonify(status)
+    except ImportError:
+        return jsonify({"error": "threat intel module not available"}), 503
+
+
 # ── Start detection collectors in background ──
 _starup_detection_done = False
 _starup_detection_lock = threading.Lock()
