@@ -1,0 +1,66 @@
+# DeepSight Syslog Ingestion Config — Example
+# Copy to: ~/.config/deepsight/syslog.toml (or set SYSLOG_CONFIG env var)
+#
+# DeepSight listens for UDP syslog messages from routers, switches,
+# firewalls, NAS devices, and any other syslog-speaking device.
+#
+# To send logs to DeepSight, configure your device to forward syslog
+# to the DeepSight host on the configured port (default UDP 514).
+
+# ── Server ──
+[server]
+# UDP port to listen on (ports < 1024 require root or CAP_NET_BIND_SERVICE)
+port = 514
+# IP address to bind to (0.0.0.0 = all interfaces, 127.0.0.1 = local only)
+bind = "0.0.0.0"
+
+# ── Alert Rules ──
+# DeepSight evaluates incoming syslog messages against these rules
+# and creates security alerts when thresholds are exceeded.
+[alert_rules]
+
+# Firewall DENY flood: alert when a single source IP triggers many
+# blocked/dropped/rejected packets in a short window.
+[alert_rules.firewall_deny_flood]
+enabled = true
+count = 20        # number of DENY messages from same IP
+window_s = 60     # time window in seconds
+
+# Device auth failure flood: alert on repeated auth failures
+# against network infrastructure (routers, switches).
+[alert_rules.auth_fail_flood]
+enabled = true
+count = 5         # number of auth failures from same host
+window_s = 60
+
+# Connection reset flood (port scan indicator)
+[alert_rules.reset_flood]
+enabled = true
+count = 15        # number of connection resets from same IP
+window_s = 60
+
+# NAS external login: alert on logins from non-private IPs
+[alert_rules.nas_external_login]
+enabled = true
+
+# ── Device Configuration Examples ──
+#
+# Cisco IOS:
+#   logging host <deepsight-ip> transport udp port 514
+#   logging trap informational
+#
+# pfSense / OPNsense:
+#   Status → System Logs → Settings → Remote Logging
+#   Add: <deepsight-ip>:514
+#
+# MikroTik RouterOS:
+#   /system logging action set remote bsd-syslog=yes remote=<deepsight-ip> remote-port=514
+#   /system logging add topics=info,!debug action=remote
+#
+# Synology NAS:
+#   Log Center → Log Sending → Send Logs to Syslog Server
+#   Server: <deepsight-ip>, Port: 514
+#
+# Linux (rsyslog):
+#   echo '*.* @<deepsight-ip>:514' >> /etc/rsyslog.d/50-deepsight.conf
+#   systemctl restart rsyslog
