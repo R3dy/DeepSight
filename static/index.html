@@ -877,6 +877,40 @@
     color: var(--text-primary);
   }
 
+  /* Threat Intel widget */
+  .sec-ti-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px; padding: 8px 0;
+  }
+  .sec-ti-source {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px;
+    display: flex; flex-direction: column; gap: 4px;
+    transition: border-color 0.2s;
+  }
+  .sec-ti-source:hover { border-color: rgba(139,92,246,0.3); }
+  .sec-ti-source.loaded { border-left: 3px solid var(--accent-green); }
+  .sec-ti-source.stale { border-left: 3px solid var(--accent-yellow); }
+  .sec-ti-source.missing { border-left: 3px solid var(--border); opacity: 0.5; }
+  .sec-ti-name {
+    font-weight: 700; font-size: 0.7rem; color: var(--text-primary);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .sec-ti-count {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+    color: var(--accent-violet);
+  }
+  .sec-ti-age {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--text-muted);
+  }
+  .sec-ti-observed {
+    margin-top: 8px; padding: 8px; background: rgba(139,92,246,0.05);
+    border-radius: var(--radius-sm); display: flex; gap: 16px;
+    font-size: 0.65rem;
+  }
+  .sec-ti-observed span { color: var(--accent-violet); font-weight: 700; }
+
   /* Syslog / External Logs widget */
   .sec-syslog-toolbar {
     display: flex; gap: 10px; padding: 8px 16px;
@@ -1288,6 +1322,21 @@
       </div>
       <div class="sec-file-scroll" id="sec-file-scroll">
         <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+      </div>
+    </div>
+
+    <!-- ROW 4.5: Threat Intelligence -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">🌐 Threat Intelligence</span>
+        <span class="card-badge" id="sec-ti-badge">feeding</span>
+      </div>
+      <div class="sec-ti-grid" id="sec-ti-grid">
+        <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+      </div>
+      <div class="sec-ti-observed">
+        <span>Observed IPs: <span id="sec-ti-ips">—</span></span>
+        <span>Observed Domains: <span id="sec-ti-domains">—</span></span>
       </div>
     </div>
 
@@ -2700,6 +2749,8 @@ function startSecurityPolling() {
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchAuthEvents(); }, 5000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchFileEvents(); }, 10000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSyslogEvents(); }, 10000));
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchThreatIntel(); }, 30000));
+  fetchThreatIntel();
 }
 
 function stopSecurityPolling() {
@@ -3055,6 +3106,77 @@ function renderSyslogEventsError(msg) {
   document.getElementById('sec-syslog-list').innerHTML =
     '<div class="sec-error">⚠️ ' + msg + '</div>';
   document.getElementById('sec-syslog-badge').textContent = 'error';
+}
+
+// ═══════════════════════════════════════════
+// Threat Intelligence
+// ═══════════════════════════════════════════
+
+const TI_SOURCE_LABELS = {
+  abuseipdb: 'AbuseIPDB',
+  otx: 'AlienVault OTX',
+  urlhaus: 'URLhaus',
+  feodo: 'Feodo Tracker',
+  tor: 'Tor Exit Nodes',
+};
+
+async function fetchThreatIntel() {
+  try {
+    const res = await fetch('/api/threat-intel');
+    const data = await res.json();
+    renderThreatIntel(data);
+  } catch (e) {
+    document.getElementById('sec-ti-grid').innerHTML =
+      '<div class="sec-error">Threat intel unavailable</div>';
+    document.getElementById('sec-ti-badge').textContent = 'offline';
+  }
+}
+
+function renderThreatIntel(data) {
+  const grid = document.getElementById('sec-ti-grid');
+  const badge = document.getElementById('sec-ti-badge');
+
+  let loadedCount = 0;
+  let totalSources = 0;
+
+  let html = '';
+  for (const [source, info] of Object.entries(data)) {
+    if (source === 'observed_ips' || source === 'observed_domains') continue;
+    if (!TI_SOURCE_LABELS[source]) continue;
+
+    totalSources++;
+    const label = TI_SOURCE_LABELS[source] || source;
+    let statusClass = 'missing';
+    let statusIcon = '⏳';
+
+    if (info.loaded) {
+      loadedCount++;
+      statusClass = info.stale ? 'stale' : 'loaded';
+      statusIcon = info.stale ? '⚠️' : '✅';
+    }
+
+    const ageText = info.loaded
+      ? formatAge(info.age_seconds)
+      : 'not loaded';
+
+    html += `<div class="sec-ti-source ${statusClass}">
+      <div class="sec-ti-name">${statusIcon} ${label}</div>
+      <div class="sec-ti-count">${info.count.toLocaleString()} indicators</div>
+      <div class="sec-ti-age">${ageText}</div>
+    </div>`;
+  }
+
+  grid.innerHTML = html || '<div class="sec-empty">No threat intel sources loaded</div>';
+  badge.textContent = `${loadedCount}/${totalSources} loaded`;
+
+  document.getElementById('sec-ti-ips').textContent = data.observed_ips?.toLocaleString() || '0';
+  document.getElementById('sec-ti-domains').textContent = data.observed_domains?.toLocaleString() || '0';
+}
+
+function formatAge(seconds) {
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
 }
 
 // ═══════════════════════════════════════════
