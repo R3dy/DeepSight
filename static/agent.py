@@ -408,7 +408,7 @@ def load_config():
     config_path = os.path.join(script_dir, "config.json")
 
     defaults = {
-        "collector_url": "https://open-claw01.tail9058f7.ts.net:8451",
+        "collector_url": "https://your-server.your-tailnet.ts.net:8451",
         "secret": "sysdash-agent-key-2026",
         "host": socket.gethostname(),
         "interval": 2,

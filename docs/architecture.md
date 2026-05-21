@@ -60,7 +60,7 @@
 
 ### Collector (`server.py`)
 
-A Flask application that runs on the primary host (`open-claw01`). Responsibilities:
+A Flask application that runs on the primary host (`your-server`). Responsibilities:
 
 - **Self-monitoring** — collects stats from localhost using `psutil` and direct `/proc`/`/sys` reads
 - **Agent ingestion** — receives reports from remote agents via `POST /api/report`

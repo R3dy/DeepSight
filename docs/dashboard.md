@@ -161,23 +161,4 @@ Changes to `/etc/sudoers`, `/etc/shadow`, or `authorized_keys` are highlighted i
 - **Expand (⛶)** — every widget has a deep-dive button for additional detail
 - **ESC** — close any modal or tooltip
 
-## 🛡️ Security View
-
-The Security tab provides SIEM-level threat visibility with five widgets:
-
-### Alert Summary
-Four severity cards: Critical (red), High (orange), Medium (yellow), Low (blue) with aggregate stats.
-
-### Active Alerts
-Scrollable list with severity badges, MITRE ATT&CK tags, timestamps, and Acknowledge buttons. Auto-refreshes every 5s.
-
-### C2 Beaconing
-Processes showing periodic outbound connections — process name, remote target, interval, and confidence score bar.
-
-### Auth Events
-SSH failures/successes and sudo events from `/var/log/auth.log` with colored indicators.
-
-### File Integrity
-Recent filesystem events on monitored paths (`/etc/passwd`, `/etc/sudoers`, `/root/.ssh/`, crontabs, `/tmp`).
-
-See the [Security Monitoring](/security) page for full detection rules and MITRE mappings.
+See the [Security Monitoring](/security) page for full detection rules, MITRE mappings, and alert configuration.

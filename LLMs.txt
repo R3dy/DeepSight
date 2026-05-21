@@ -255,7 +255,7 @@ lastSecuritySummary, lastAlerts, lastBeaconing, lastAuthEvents, lastFileEvents  
 
 ```json
 {
-    "collector_url": "https://open-claw01.tail9058f7.ts.net:8451",
+    "collector_url": "https://your-server.your-tailnet.ts.net:8451",
     "secret": "sysdash-agent-key-2026",
     "host": "hostname",
     "interval": 2
@@ -272,7 +272,7 @@ Do NOT use `pkill -f "python3 server.py"` — it kills the invoking shell.
 
 ### Check service health
 ```bash
-curl -k -s https://open-claw01.tail9058f7.ts.net:8451/ | head -5
+curl -k -s https://your-server.your-tailnet.ts.net:8451/ | head -5
 ```
 
 ### Run detection standalone
@@ -287,7 +287,7 @@ cd ~/apps/ram-dashboard && npm run docs:build
 
 ### Add a host
 ```bash
-curl -sSL https://open-claw01.tail9058f7.ts.net:8451/install.sh | sudo bash
+curl -sSL https://your-server.your-tailnet.ts.net:8451/install.sh | sudo bash
 ```
 
 ## Known Gotchas

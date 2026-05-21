@@ -3,7 +3,7 @@
 DeepSight SIEM Detection Engine — integrated with the System Dashboard.
 Background collectors + alert rules engine + SQLite event store.
 
-Runs as non-root (royce) with graceful degradation when privileges are missing.
+Runs as non-root with graceful degradation when privileges are missing.
 """
 
 import json

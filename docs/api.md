@@ -21,14 +21,14 @@ Returns full system stats for a host.
 **Response shape:**
 ```json
 {
-  "host": "open-claw01",
+  "host": "your-server",
   "timestamp": 1778782773,
   "memory": { "total_gb": 7.5, "used_gb": 4.4, "hard_used_gb": 3.8, "kernel_reserved_gb": 0.6, ... },
   "swap": { "total_gb": 8.0, "used_gb": 0.1, ... },
   "cpu": { "percent": 12.5, "cores": [12.5, 8.3, ...], "freq_current": 2700000000, ... },
-  "gpu": { "name": "AMD Radeon 680M", "usage": 0, "vram_used_gb": 15.8, ... },
+  "gpu": { "name": "Example GPU", "usage": 0, "vram_used_gb": 15.8, ... },
   "disks": [{ "mountpoint": "/", "used_gb": 398, "total_gb": 915, ... }],
-  "ram_processes": [{ "pid": 2112747, "name": "openclaw-gateway", "memory_gb": 0.5, ... }],
+  "ram_processes": [{ "pid": 2112747, "name": "example-process", "memory_gb": 0.5, ... }],
   "cpu_processes": [...]
 }
 ```
@@ -39,10 +39,10 @@ Returns all known hosts and their status.
 
 ```json
 {
-  "current": "open-claw01",
+  "current": "your-server",
   "hosts": {
-    "open-claw01": { "last_seen": 1778782773, "status": "online" },
-    "mobile01": { "last_seen": 1778782770, "status": "online" }
+    "your-server": { "last_seen": 1778782773, "status": "online" },
+    "another-host": { "last_seen": 1778782770, "status": "online" }
   }
 }
 ```
@@ -54,10 +54,10 @@ Returns full stats for all hosts plus cross-host process tables.
 ```json
 {
   "hosts": {
-    "open-claw01": { "memory": {...}, "cpu": {...}, "disks": [...], ... },
-    "mobile01": { "memory": {...}, "cpu": {...}, ... }
+    "your-server": { "memory": {...}, "cpu": {...}, "disks": [...], ... },
+    "another-host": { "memory": {...}, "cpu": {...}, ... }
   },
-  "cluster_top_ram": [{ "host": "open-claw01", "name": "firefox", "memory_gb": 1.2, ... }],
+  "cluster_top_ram": [{ "host": "your-server", "name": "firefox", "memory_gb": 1.2, ... }],
   "cluster_top_cpu": [...]
 }
 ```
@@ -105,12 +105,12 @@ Deep forensic detail for a single process (cached 3s).
 ```json
 {
   "pid": 2112747,
-  "name": "openclaw-gateway",
-  "user": "royce",
+  "name": "example-process",
+  "user": "admin",
   "state": "S (sleeping)",
   "threads": 27,
-  "cmdline": "openclaw-gateway --config ...",
-  "argv": ["openclaw-gateway", "--config", "..."],
+  "cmdline": "my-app --config ...",
+  "argv": ["my-app", "--config", "..."],
   "vm_rss_mb": 516.8,
   "vm_size_mb": 2048.0,
   "vm_data_mb": 320.5,
@@ -140,11 +140,11 @@ Logged-in users with session details.
 {
   "users": [
     {
-      "name": "royce",
-      "terminal": "thinlinc",
+      "name": "admin",
+      "terminal": "ssh",
       "from_ip": "203.0.113.20",
       "idle": "0.00s",
-      "what": "tl-session: royce"
+      "what": "session: admin"
     }
   ]
 }

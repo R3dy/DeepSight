@@ -1223,7 +1223,7 @@
   </div>
   </div><!-- /security-view -->
 
-  <div class="footer">DeepSight · open-claw01 · <a href="/docs/" style="color:var(--text-muted)">docs</a></div>
+  <div class="footer">DeepSight · your-server · <a href="/docs/" style="color:var(--text-muted)">docs</a></div>
 </div><!-- /container -->
 
 <!-- ═══ Process Hover Tooltip ═══ -->
@@ -1547,7 +1547,7 @@ function kv(key, val, color) {
 async function fetchNetwork() {
   const host = currentHost || '';
   // Network reads from local /proc — only valid for collector host
-  const collectorHost = lastHostsData?.current || 'open-claw01';
+  const collectorHost = lastHostsData?.current || 'your-server';
   if (host && host !== collectorHost) {
     renderNetworkPlaceholder();
     return;

@@ -23,7 +23,7 @@
 ## Installation
 
 ```bash
-curl -sSL https://<collector>:8451/install.sh | sudo bash
+curl -sSL https://your-server.your-tailnet.ts.net:8451/install.sh | sudo bash
 ```
 
 The install script is generated dynamically by the collector and includes the correct URL and shared secret.
@@ -43,7 +43,7 @@ Edit `/opt/sysdash-agent/config.json`:
 
 ```json
 {
-    "collector_url": "https://open-claw01.tail9058f7.ts.net:8451",
+    "collector_url": "https://your-server.your-tailnet.ts.net:8451",
     "secret": "sysdash-agent-key-2026",
     "host": "my-server",
     "interval": 2
@@ -101,7 +101,7 @@ systemctl status sysdash-agent
 journalctl -u sysdash-agent -n 20
 
 # Test connectivity from agent host
-curl -k https://<collector>:8451/api/hosts
+curl -k https://your-server.your-tailnet.ts.net:8451/api/hosts
 ```
 
 ### Permission errors

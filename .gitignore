@@ -8,3 +8,4 @@ static/docs/
 node_modules/
 .DS_Store
 *.log
+docs/.vitepress/dist/

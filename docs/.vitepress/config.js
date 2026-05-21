@@ -21,7 +21,7 @@ export default defineConfig({
 
   themeConfig: {
     nav: [
-      { text: 'Dashboard', link: 'https://open-claw01.tail9058f7.ts.net:8451/' },
+      { text: 'Dashboard', link: 'http://localhost:8451/' },
       { text: 'GitHub', link: 'https://github.com/R3dy/DeepSight' },
     ],
     sidebar: [

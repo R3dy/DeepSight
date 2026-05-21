@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""System Dashboard Server — multi-host collector for open-claw01."""
+"""System Dashboard Server — multi-host collector for DeepSight."""
 
 import json
 import os
@@ -1382,7 +1382,7 @@ def api_users():
 @app.route("/install.sh")
 def install_script():
     """Serve the agent install script with embedded secret and collector URL."""
-    collector_url = f"https://open-claw01.tail9058f7.ts.net:8451"
+    collector_url = f"https://your-server.your-tailnet.ts.net:8451"
     script = f"""#!/usr/bin/env bash
 # ── System Dashboard Agent Installer ──
 # Run: curl -sSL {collector_url}/install.sh | sudo bash

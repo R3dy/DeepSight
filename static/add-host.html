@@ -142,7 +142,7 @@
       <span class="step-num">1</span><h3>Run the install command</h3>
       <p>SSH into the target host and run this single command as root:</p>
       <div class="code-block" id="install-cmd">
-curl -sSL https://open-claw01.tail9058f7.ts.net:8451/install.sh | sudo bash
+curl -sSL https://your-server.your-tailnet.ts.net:8451/install.sh | sudo bash
         <button class="copy-btn" onclick="copyCommand()">Copy</button>
       </div>
     </div>
@@ -179,7 +179,7 @@ journalctl -u sysdash-agent -f
 
 <script>
 function copyCommand() {
-  const text = "curl -sSL https://open-claw01.tail9058f7.ts.net:8451/install.sh | sudo bash";
+  const text = "curl -sSL https://your-server.your-tailnet.ts.net:8451/install.sh | sudo bash";
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.querySelector('.copy-btn');
     btn.textContent = 'Copied!';
