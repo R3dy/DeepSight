@@ -5,7 +5,42 @@ All notable changes to DeepSight will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] — 2026-05-21
+## [0.4.0] — 2026-05-21
+
+### Added
+- **Authentication module** (`auth.py`) — industry-standard auth for all API endpoints
+  - argon2id password hashing (OWASP-recommended) with PBKDF2-SHA256 fallback
+  - Bearer token authentication with configurable TTL (default: 24h)
+  - API key authentication for agents and integrations (default: 90d TTL)
+  - SHA-256 hashed token storage — plaintext tokens never persisted
+  - IP-based rate limiting (5 failures/60s per IP)
+  - Full audit logging for all auth events (login, logout, key creation, rate limits)
+  - Auto-creation of admin user on first startup with random password
+- **Auth API endpoints**
+  - `POST /api/auth/login` — authenticate and receive session token
+  - `POST /api/auth/logout` — revoke current session token
+  - `GET /api/auth/status` — current user info and token validity
+  - `POST /api/auth/api-keys` — create scoped API keys (read-only, full, agent)
+  - `DELETE /api/auth/api-keys/<id>` — revoke API keys
+  - `GET /api/auth/audit` — audit event log with type filtering
+- **Login UI** — centered card overlay with localStorage token persistence
+- **Agent API key support** — agent script accepts `--api-key` and `api_key` in config.json
+- **Backward compatibility** — `DEEPSIGHT_INSECURE_NO_AUTH=true` escape hatch for migration
+- 58 new auth test cases covering password hashing, token lifecycle, API keys, rate limiting, audit logging, endpoint protection, agent auth, and backward compatibility
+
+### Changed
+- ALL 12 API endpoints now require authentication (401 without valid Bearer token)
+- `/api/report` now uses `@require_agent_auth` decorator instead of shared secret comparison
+- Agent installer script references API keys instead of embedded shared secret
+- Static routes (/, /docs/, /add-host) remain unauthenticated
+
+### Security
+- Fixes zero-authentication vulnerability — all API endpoints previously accessible to any network neighbor
+- Process FDs, environment variables, network topology, and user sessions now require authentication
+- Passwords hashed with argon2id (time_cost=3, memory_cost=65536)
+- Tokens stored as SHA-256 hashes, never in plaintext
+
+
 
 ### Added
 - UDP syslog ingestion server (`syslog_ingest.py`) on configurable port 514

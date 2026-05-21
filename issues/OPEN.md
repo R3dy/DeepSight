@@ -1,0 +1,86 @@
+# Open Issues — DeepSight
+
+> Captured from Discord #issues channel (`1507090516733595658`).
+> Autonomous dev team: pick up from here. Move resolved items to `CLOSED.md`.
+
+---
+
+## DS-001 — Rename sysdash-agent → deep-scout (docs + code)
+
+**Reported:** 2026-05-21 13:42 CDT by Royce
+**Priority:** Medium
+**Scope:** Docs site + agent code + installer + config
+
+### Problem
+The agents docs page (https://deep-sight-ecru.vercel.app/agents.html) and agent code use `sysdash` / `sysdash-agent` throughout. Legacy name from the original System Dashboard project.
+
+### Proposed naming
+- Agent name: **deep-scout** (Royce's preference)
+- Directory: `/opt/deep-scout/` (was `/opt/sysdash-agent/`)
+- Systemd service: `deep-scout` (was `sysdash-agent`)
+- Shared secret: `deep-scout-key-2026` (was `sysdash-agent-key-2026`)
+- Docs: all references updated
+
+### Files affected
+| Location | Current | Target |
+|---|---|---|
+| `agent.py` | sysdash-agent references | deep-scout |
+| `install.sh` | sysdash-agent paths | deep-scout |
+| `server.py` | secret key, references | deep-scout-key-2026 |
+| Docs (Vercel) | agents.html, install guide | deep-scout |
+| systemd unit | sysdash-agent.service | deep-scout.service |
+
+### Acceptance criteria
+- [ ] Agent renamed in code (agent.py, install.sh, server.py)
+- [ ] Docs updated on deep-sight-ecru.vercel.app
+- [ ] `curl | sudo bash` install works with new name
+- [ ] Old sysdash references gone from all user-facing surfaces
+- [ ] Existing deployed agents get migration notes (or re-install required)
+
+---
+
+## DS-002 — /add-host shows hardcoded placeholder URL instead of dynamic collector URL
+
+**Reported:** 2026-05-21 13:51 CDT by Royce
+**Priority:** High
+**Scope:** `server.py` — `/add-host` endpoint / `install.sh` template
+
+### Problem
+The `/add-host` page shows:
+```
+curl -sSL https://your-server.your-tailnet.ts.net:8451/install.sh | sudo bash
+```
+This placeholder is useless. Users have to manually edit it.
+
+### Expected behavior
+The install command should dynamically populate the actual collector URL based on:
+- The running process's bound address / hostname
+- Local DNS / Tailscale MagicDNS resolution
+- Or the `Host` header from the incoming request
+
+### Acceptance criteria
+- [ ] `/add-host` page shows the real collector URL, not a placeholder
+- [ ] Works correctly when accessed via Tailscale FQDN, tailnet IP, or localhost
+- [ ] install.sh curl command is copy-paste ready with zero manual edits
+
+---
+
+## DS-003 — Authentication docs missing (account setup, default credentials)
+
+**Reported:** 2026-05-21 14:01 CDT by Royce
+**Priority:** High
+**Scope:** Docs site (deep-sight-ecru.vercel.app)
+
+### Problem
+Authentication was added to DeepSight but there's zero documentation for:
+- How to set up a new account
+- What the default credentials are
+- Login flow / first-run experience
+
+New features are landing without corresponding docs updates.
+
+### Acceptance criteria
+- [ ] Docs page covering initial account setup
+- [ ] Default credentials documented (or first-run setup wizard described)
+- [ ] Login flow explained in docs
+- [ ] Process doc: all feature PRs must include docs updates

@@ -8,21 +8,15 @@ import time
 import uuid
 import threading
 import psutil
-from flask import Flask, jsonify, send_from_directory, request
+from datetime import datetime, timezone
+from flask import Flask, jsonify, send_from_directory, request, g
+
+import auth
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
 # ── Shared secret for agent auth ──
 SHARED_SECRET = os.environ.get("DASHBOARD_SECRET", "sysdash-agent-key-2026")
-
-# ── Version ──
-SERVER_VERSION = "0.0.0"
-try:
-    _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
-    with open(_vf) as f:
-        SERVER_VERSION = f.read().strip()
-except Exception:
-    pass
 
 # ── Host storage: {host_id: {last_seen, stats, status}} ──
 HOSTS = {}
@@ -1142,35 +1136,8 @@ def add_host_page():
     return send_from_directory("static", "add-host.html")
 
 
-@app.route("/api/version")
-def api_version():
-    """Return server version and git metadata."""
-    git_sha = ""
-    git_ref = ""
-    try:
-        import subprocess
-        git_sha = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        git_ref = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except Exception:
-        pass
-    return jsonify({
-        "version": SERVER_VERSION,
-        "git_sha": git_sha,
-        "git_ref": git_ref,
-        "release_url": f"https://github.com/R3dy/DeepSight/releases/tag/v{SERVER_VERSION}" if SERVER_VERSION != "0.0.0" else "",
-        "repo_url": "https://github.com/R3dy/DeepSight",
-    })
-
-
 @app.route("/api/stats")
+@auth.require_auth
 def api_stats():
     host = request.args.get("host", SELF_HOST)
 
@@ -1203,14 +1170,11 @@ def api_stats():
 
 
 @app.route("/api/report", methods=["POST"])
+@auth.require_agent_auth
 def api_report():
     data = request.get_json(force=True)
     if not data:
         return jsonify({"error": "invalid json"}), 400
-
-    secret = data.get("secret", "")
-    if secret != SHARED_SECRET:
-        return jsonify({"error": "unauthorized"}), 403
 
     host = data.get("host", "unknown")
     # Don't allow overwriting localhost with agent reports
@@ -1230,6 +1194,7 @@ def api_report():
 
 
 @app.route("/api/hosts")
+@auth.require_auth
 def api_hosts():
     prune_stale_hosts()
     now = time.time()
@@ -1253,13 +1218,13 @@ def api_hosts():
             hosts[h] = {
                 "last_seen": entry["last_seen"],
                 "status": status,
-                "version": entry["stats"].get("agent_version", "") if h != SELF_HOST else SERVER_VERSION,
             }
 
     return jsonify({"hosts": hosts, "current": SELF_HOST})
 
 
 @app.route("/api/summary")
+@auth.require_auth
 def api_summary():
     """Return compact summary for all hosts — used by overview grid."""
     prune_stale_hosts()
@@ -1330,6 +1295,7 @@ def api_summary():
 
 
 @app.route("/api/cluster")
+@auth.require_auth
 def api_cluster():
     """Return full stats for all hosts — used by cluster overview."""
     prune_stale_hosts()
@@ -1384,6 +1350,7 @@ def api_cluster():
 
 
 @app.route("/api/process/<int:pid>")
+@auth.require_auth
 def api_process_detail(pid):
     """Deep forensic detail for a single process (cached)."""
     global _PROCESS_CACHE
@@ -1399,6 +1366,7 @@ def api_process_detail(pid):
 
 
 @app.route("/api/network")
+@auth.require_auth
 def api_network():
     """Return network stats for localhost (cached)."""
     global _NETWORK_CACHE
@@ -1412,6 +1380,7 @@ def api_network():
 
 
 @app.route("/api/users")
+@auth.require_auth
 def api_users():
     """Return logged-in users and current activity."""
     return jsonify({"users": collect_users()})
@@ -1424,11 +1393,16 @@ def install_script():
     script = f"""#!/usr/bin/env bash
 # ── System Dashboard Agent Installer ──
 # Run: curl -sSL {collector_url}/install.sh | sudo bash
+#
+# NOTE: DeepSight 0.4.0+ requires API key authentication.
+# After installing the agent, login to the dashboard and create an API key:
+#   1. Navigate to Settings → API Keys
+#   2. Create an API key with 'agent' scope
+#   3. Update /opt/sysdash-agent/config.json with the api_key field
 
 set -e
 
 COLLECTOR_URL="{collector_url}"
-SECRET="{SHARED_SECRET}"
 INSTALL_DIR="/opt/sysdash-agent"
 SERVICE_NAME="sysdash-agent"
 
@@ -1476,11 +1450,17 @@ echo "⚠ psutil not available — agent will use basic /proc polling"
 cat > "$INSTALL_DIR/config.json" << EOFCFG
 {{
     "collector_url": "$COLLECTOR_URL",
-    "secret": "$SECRET",
     "host": "$(hostname)",
-    "interval": 2
+    "interval": 2,
+    "api_key": "YOUR_API_KEY_HERE"
 }}
 EOFCFG
+
+echo ""
+echo "⚠  IMPORTANT: You must set the api_key in $INSTALL_DIR/config.json"
+echo "   Login to the DeepSight dashboard, go to Settings → API Keys,"
+echo "   create a key with 'agent' scope, and copy it here."
+echo ""
 
 # Create systemd service
 cat > "/etc/systemd/system/$SERVICE_NAME.service" << EOFSVC
@@ -1514,6 +1494,7 @@ if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "   Logs:    journalctl -u $SERVICE_NAME -f"
     echo "   Config:  $INSTALL_DIR/config.json"
     echo ""
+    echo "⚠  Don't forget to set the API key in config.json!"
     echo "→ Check your dashboard for '$(hostname)'"
 else
     echo "❌ Agent failed to start. Check logs:"
@@ -1543,6 +1524,7 @@ except ImportError as e:
 
 
 @app.route("/api/alerts")
+@auth.require_auth
 def api_alerts():
     """Return recent alerts with optional filters."""
     if not DETECTION_AVAILABLE:
@@ -1557,6 +1539,7 @@ def api_alerts():
 
 
 @app.route("/api/beaconing")
+@auth.require_auth
 def api_beaconing():
     """Return active beaconing detections."""
     if not DETECTION_AVAILABLE:
@@ -1565,6 +1548,7 @@ def api_beaconing():
 
 
 @app.route("/api/auth-events")
+@auth.require_auth
 def api_auth_events():
     """Return recent auth events with optional type filter."""
     if not DETECTION_AVAILABLE:
@@ -1574,6 +1558,7 @@ def api_auth_events():
 
 
 @app.route("/api/file-events")
+@auth.require_auth
 def api_file_events():
     """Return recent file integrity events."""
     if not DETECTION_AVAILABLE:
@@ -1582,6 +1567,7 @@ def api_file_events():
 
 
 @app.route("/api/security-summary")
+@auth.require_auth
 def api_security_summary():
     """Aggregated security summary."""
     if not DETECTION_AVAILABLE:
@@ -1590,6 +1576,7 @@ def api_security_summary():
 
 
 @app.route("/api/alerts/acknowledge", methods=["POST"])
+@auth.require_auth
 def api_acknowledge_alert():
     """Mark an alert as acknowledged."""
     if not DETECTION_AVAILABLE:
@@ -1603,6 +1590,7 @@ def api_acknowledge_alert():
 
 
 @app.route("/api/alert-stats")
+@auth.require_auth
 def api_alert_stats():
     """Alert counts by severity and category for the last 24h."""
     if not DETECTION_AVAILABLE:
@@ -1612,6 +1600,7 @@ def api_alert_stats():
 
 
 @app.route("/api/syslog-events")
+@auth.require_auth
 def api_syslog_events():
     """Return recent syslog events with optional host/facility filters."""
     if not DETECTION_AVAILABLE:
@@ -1631,11 +1620,205 @@ def api_syslog_events():
 
 
 @app.route("/api/syslog-hosts")
+@auth.require_auth
 def api_syslog_hosts():
     """Return distinct syslog hosts."""
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
     return jsonify({"hosts": detection.get_syslog_hosts()})
+
+
+@app.route("/api/threat-intel")
+@auth.require_auth
+def api_threat_intel():
+    """Return threat intelligence feed status and observed IPs."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    try:
+        if not getattr(detection, "HAS_THREAT_INTEL", False):
+            return jsonify({"error": "threat intel module not available"}), 503
+        import threat_intel
+        status = threat_intel.get_threat_intel_status()
+        return jsonify(status)
+    except ImportError:
+        return jsonify({"error": "threat intel module not available"}), 503
+
+
+# ═══════════════════════════════════════════
+# Authentication API Endpoints
+# ═══════════════════════════════════════════
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    """Authenticate user and return a session token."""
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    ip = auth._get_client_ip()
+
+    # Rate limit check
+    if not auth.check_rate_limit(ip=ip):
+        auth.log_audit(
+            event_type="rate_limit_hit",
+            username=username or None,
+            ip_address=ip,
+            user_agent=request.headers.get("User-Agent", ""),
+            details=f"Rate limit exceeded for login endpoint",
+        )
+        return jsonify({
+            "error": "rate_limited",
+            "reason": "Too many login attempts. Try again in 60 seconds.",
+        }), 429
+
+    if not username or not password:
+        return jsonify({"error": "invalid_request", "reason": "Username and password required"}), 400
+
+    user = auth.verify_user(username, password)
+    if not user:
+        auth.record_failure(ip=ip)
+        auth.log_audit(
+            event_type="login_failure",
+            username=username,
+            ip_address=ip,
+            user_agent=request.headers.get("User-Agent", ""),
+            details="Invalid credentials",
+        )
+        return jsonify({"error": "unauthorized", "reason": "Invalid credentials"}), 401
+
+    # Create session token
+    token_info = auth.create_token(user["id"], token_type="session", scope="full")
+
+    auth.log_audit(
+        event_type="login_success",
+        username=user["username"],
+        user_id=user["id"],
+        token_id=token_info["token_id"],
+        ip_address=ip,
+        user_agent=request.headers.get("User-Agent", ""),
+    )
+
+    return jsonify({
+        "token": token_info["token"],
+        "expires_at": token_info["expires_at"],
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "is_admin": user["is_admin"],
+        },
+    })
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@auth.require_auth
+def api_auth_logout():
+    """Revoke the current session token."""
+    token = auth._extract_bearer_token()
+    if token:
+        auth.revoke_token(token)
+        auth.log_audit(
+            event_type="logout",
+            username=g.current_user.get("username"),
+            user_id=g.current_user.get("user_id"),
+            token_id=g.current_user.get("token_id"),
+            ip_address=auth._get_client_ip(),
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/auth/status")
+@auth.require_auth
+def api_auth_status():
+    """Return current user info and token status."""
+    return jsonify({
+        "user": {
+            "id": g.current_user["user_id"],
+            "username": g.current_user["username"],
+            "is_admin": g.current_user["is_admin"],
+        },
+        "token_expires": g.current_user.get("expires_at"),
+        "scope": g.current_user.get("scope"),
+    })
+
+
+@app.route("/api/auth/api-keys", methods=["POST"])
+@auth.require_auth
+def api_auth_create_api_key():
+    """Create a new API key. Requires authentication."""
+    data = request.get_json(silent=True) or {}
+    scope = data.get("scope", "read-only")
+    ttl_days = data.get("ttl_days")
+    name = data.get("name")
+
+    # Validate scope
+    valid_scopes = ["read-only", "full", "agent"]
+    if scope not in valid_scopes:
+        return jsonify({"error": "invalid_scope", "valid_scopes": valid_scopes}), 400
+
+    try:
+        key_info = auth.create_api_key(
+            g.current_user["user_id"],
+            scope=scope,
+            ttl_days=ttl_days,
+            name=name,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    auth.log_audit(
+        event_type="api_key_created",
+        username=g.current_user["username"],
+        user_id=g.current_user["user_id"],
+        ip_address=auth._get_client_ip(),
+        user_agent=request.headers.get("User-Agent", ""),
+        details=f"Created API key scope={scope} name={name}",
+    )
+
+    return jsonify({
+        "api_key": key_info["api_key"],
+        "id": key_info["id"],
+        "scope": key_info["scope"],
+        "expires_at": key_info["expires_at"],
+    }), 201
+
+
+@app.route("/api/auth/api-keys", methods=["GET"])
+@auth.require_auth
+def api_auth_list_api_keys():
+    """List API keys for the current user."""
+    keys = auth.list_api_keys(g.current_user["user_id"])
+    return jsonify({"api_keys": keys})
+
+
+@app.route("/api/auth/api-keys/<int:key_id>", methods=["DELETE"])
+@auth.require_auth
+def api_auth_revoke_api_key(key_id):
+    """Revoke an API key by its ID."""
+    ok = auth.revoke_api_key(key_id)
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+
+    auth.log_audit(
+        event_type="api_key_revoked",
+        username=g.current_user["username"],
+        user_id=g.current_user["user_id"],
+        api_key_id=key_id,
+        ip_address=auth._get_client_ip(),
+        user_agent=request.headers.get("User-Agent", ""),
+    )
+    return jsonify({"status": "revoked", "id": key_id})
+
+
+@app.route("/api/auth/audit")
+@auth.require_auth
+def api_auth_audit():
+    """Return recent authentication audit events."""
+    limit = request.args.get("limit", 50, type=int)
+    event_type = request.args.get("type")
+    events = auth.get_audit_events(limit=limit, event_type=event_type)
+    return jsonify({"events": events, "count": len(events)})
 
 
 # ── Start detection collectors in background ──
@@ -1660,6 +1843,11 @@ def _ensure_detection_started():
 
 
 if __name__ == "__main__":
+    # Initialize auth database and admin user
+    auth.init_auth_db()
+    auth.init_admin_user()
+    auth.print_migration_instructions()
+
     # Start detection collectors immediately in standalone mode
     if DETECTION_AVAILABLE:
         detection.start_collectors()

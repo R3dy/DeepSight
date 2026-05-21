@@ -877,6 +877,40 @@
     color: var(--text-primary);
   }
 
+  /* Threat Intel widget */
+  .sec-ti-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px; padding: 8px 0;
+  }
+  .sec-ti-source {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px;
+    display: flex; flex-direction: column; gap: 4px;
+    transition: border-color 0.2s;
+  }
+  .sec-ti-source:hover { border-color: rgba(139,92,246,0.3); }
+  .sec-ti-source.loaded { border-left: 3px solid var(--accent-green); }
+  .sec-ti-source.stale { border-left: 3px solid var(--accent-yellow); }
+  .sec-ti-source.missing { border-left: 3px solid var(--border); opacity: 0.5; }
+  .sec-ti-name {
+    font-weight: 700; font-size: 0.7rem; color: var(--text-primary);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .sec-ti-count {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+    color: var(--accent-violet);
+  }
+  .sec-ti-age {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--text-muted);
+  }
+  .sec-ti-observed {
+    margin-top: 8px; padding: 8px; background: rgba(139,92,246,0.05);
+    border-radius: var(--radius-sm); display: flex; gap: 16px;
+    font-size: 0.65rem;
+  }
+  .sec-ti-observed span { color: var(--accent-violet); font-weight: 700; }
+
   /* Syslog / External Logs widget */
   .sec-syslog-toolbar {
     display: flex; gap: 10px; padding: 8px 16px;
@@ -959,9 +993,70 @@
     text-align: center; margin-top: 18px;
     font-size: 0.62rem; color: var(--text-muted); opacity: 0.5;
   }
+
+  /* ── Login Overlay ── */
+  #login-overlay {
+    position: fixed; inset: 0;
+    background: var(--bg-deep);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999;
+  }
+  .login-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px; max-width: 400px; width: 100%;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  }
+  .login-card h2 { margin: 0 0 4px 0; font-size: 22px; }
+  .login-card .login-subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+  .login-card label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .login-card input[type="text"], .login-card input[type="password"] {
+    width: 100%; padding: 10px 12px;
+    background: var(--bg-deep); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-primary); font-size: 14px;
+    margin-bottom: 16px; outline: none; transition: border-color 0.2s;
+  }
+  .login-card input:focus { border-color: var(--accent-cyan); }
+  .login-card input::placeholder { color: var(--text-muted); opacity: 0.5; }
+  .login-btn {
+    width: 100%; padding: 10px;
+    background: var(--accent-violet); color: #fff;
+    border: none; border-radius: 6px; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .login-btn:hover { background: #7c3aed; }
+  .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .login-error {
+    color: var(--accent-yellow); font-size: 12px; margin-bottom: 12px;
+    min-height: 18px; text-align: center;
+  }
+  #logout-btn {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  #logout-btn:hover { background: #dc2626; color: #fff; border-color: #dc2626; }
 </style>
 </head>
 <body>
+
+<!-- ── Login Overlay ── -->
+<div id="login-overlay">
+  <div class="login-card">
+    <h2>⚡ DeepSight</h2>
+    <div class="login-subtitle">Sign in to access the dashboard</div>
+    <form id="login-form" onsubmit="return doLogin()">
+      <label for="login-username">Username</label>
+      <input type="text" id="login-username" placeholder="admin" autocomplete="username" required>
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" required>
+      <div class="login-error" id="login-error"></div>
+      <button type="submit" class="login-btn" id="login-btn">Sign In</button>
+    </form>
+  </div>
+</div>
+
 <div class="container">
 
   <!-- Header -->
@@ -974,6 +1069,7 @@
       </div>
     </div>
     <div class="header-right">
+      <button id="logout-btn" onclick="doLogout()" title="Sign out">Sign Out</button>
       <div class="tab-nav">
         <button class="tab-btn active" onclick="switchView('detail')" id="tab-detail">Detail</button>
         <button class="tab-btn" onclick="switchView('security')" id="tab-security">🛡️ Security</button>
@@ -1291,6 +1387,21 @@
       </div>
     </div>
 
+    <!-- ROW 4.5: Threat Intelligence -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">🌐 Threat Intelligence</span>
+        <span class="card-badge" id="sec-ti-badge">feeding</span>
+      </div>
+      <div class="sec-ti-grid" id="sec-ti-grid">
+        <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+      </div>
+      <div class="sec-ti-observed">
+        <span>Observed IPs: <span id="sec-ti-ips">—</span></span>
+        <span>Observed Domains: <span id="sec-ti-domains">—</span></span>
+      </div>
+    </div>
+
     <!-- ROW 5: External Logs (Syslog) -->
     <div class="card card-full">
       <div class="card-header">
@@ -1332,6 +1443,164 @@
 </div>
 
 <script>
+// ═══════════════════════════════════════════
+// Authentication
+// ═══════════════════════════════════════════
+const TOKEN_KEY = 'deepsight_token';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function setToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+function showLogin(msg) {
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.querySelector('.container').style.display = 'none';
+  document.getElementById('logout-btn').style.display = 'none';
+  document.getElementById('header-hostname').textContent = 'sign in required';
+  if (msg) {
+    document.getElementById('login-error').textContent = msg;
+  }
+}
+
+function hideLogin() {
+  document.getElementById('login-overlay').style.display = 'none';
+  document.querySelector('.container').style.display = '';
+  document.getElementById('logout-btn').style.display = '';
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-error');
+
+  if (!username || !password) {
+    err.textContent = 'Username and password required';
+    return false;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  err.textContent = '';
+
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      err.textContent = data.reason || 'Login failed';
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+      return false;
+    }
+
+    setToken(data.token);
+    hideLogin();
+
+    // Start the dashboard
+    init();
+  } catch (e) {
+    err.textContent = 'Connection error. Is the server running?';
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+
+  return false;
+}
+
+async function doLogout() {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+  } catch (e) { /* ignore */ }
+  clearToken();
+  showLogin('Signed out');
+}
+
+async function apiFetch(url, options = {}) {
+  const token = getToken();
+  if (!token) {
+    showLogin('Session expired. Please sign in again.');
+    throw new Error('no token');
+  }
+
+  const headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+  if (options.body && typeof options.body === 'string') {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  }
+
+  const resp = await fetch(url, { ...options, headers });
+
+  if (resp.status === 401) {
+    clearToken();
+    showLogin('Session expired. Please sign in again.');
+    throw new Error('unauthorized');
+  }
+
+  return resp;
+}
+
+async function checkAuth() {
+  const token = getToken();
+  if (!token) {
+    showLogin();
+    return false;
+  }
+
+  try {
+    const resp = await fetch('/api/auth/status', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+      clearToken();
+      showLogin();
+      return false;
+    }
+    const data = await resp.json();
+    document.getElementById('header-hostname').textContent =
+      'user: ' + data.user.username + ' | loading…';
+    hideLogin();
+    return true;
+  } catch (e) {
+    showLogin();
+    return false;
+  }
+}
+
+// ── Global fetch wrapper: auto-injects Bearer token ──
+(function() {
+  const _fetch = window.fetch;
+  window.fetch = function(url, options = {}) {
+    const token = getToken();
+    if (token) {
+      options.headers = options.headers || {};
+      // Don't override if already set (e.g., login)
+      if (!options.headers['Authorization']) {
+        options.headers['Authorization'] = 'Bearer ' + token;
+      }
+    }
+    return _fetch(url, options).then(resp => {
+      if (resp.status === 401 && token) {
+        clearToken();
+        showLogin('Session expired. Please sign in again.');
+      }
+      return resp;
+    });
+  };
+})();
+
 // ═══════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════
@@ -2700,6 +2969,8 @@ function startSecurityPolling() {
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchAuthEvents(); }, 5000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchFileEvents(); }, 10000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSyslogEvents(); }, 10000));
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchThreatIntel(); }, 30000));
+  fetchThreatIntel();
 }
 
 function stopSecurityPolling() {
@@ -3058,6 +3329,77 @@ function renderSyslogEventsError(msg) {
 }
 
 // ═══════════════════════════════════════════
+// Threat Intelligence
+// ═══════════════════════════════════════════
+
+const TI_SOURCE_LABELS = {
+  abuseipdb: 'AbuseIPDB',
+  otx: 'AlienVault OTX',
+  urlhaus: 'URLhaus',
+  feodo: 'Feodo Tracker',
+  tor: 'Tor Exit Nodes',
+};
+
+async function fetchThreatIntel() {
+  try {
+    const res = await fetch('/api/threat-intel');
+    const data = await res.json();
+    renderThreatIntel(data);
+  } catch (e) {
+    document.getElementById('sec-ti-grid').innerHTML =
+      '<div class="sec-error">Threat intel unavailable</div>';
+    document.getElementById('sec-ti-badge').textContent = 'offline';
+  }
+}
+
+function renderThreatIntel(data) {
+  const grid = document.getElementById('sec-ti-grid');
+  const badge = document.getElementById('sec-ti-badge');
+
+  let loadedCount = 0;
+  let totalSources = 0;
+
+  let html = '';
+  for (const [source, info] of Object.entries(data)) {
+    if (source === 'observed_ips' || source === 'observed_domains') continue;
+    if (!TI_SOURCE_LABELS[source]) continue;
+
+    totalSources++;
+    const label = TI_SOURCE_LABELS[source] || source;
+    let statusClass = 'missing';
+    let statusIcon = '⏳';
+
+    if (info.loaded) {
+      loadedCount++;
+      statusClass = info.stale ? 'stale' : 'loaded';
+      statusIcon = info.stale ? '⚠️' : '✅';
+    }
+
+    const ageText = info.loaded
+      ? formatAge(info.age_seconds)
+      : 'not loaded';
+
+    html += `<div class="sec-ti-source ${statusClass}">
+      <div class="sec-ti-name">${statusIcon} ${label}</div>
+      <div class="sec-ti-count">${info.count.toLocaleString()} indicators</div>
+      <div class="sec-ti-age">${ageText}</div>
+    </div>`;
+  }
+
+  grid.innerHTML = html || '<div class="sec-empty">No threat intel sources loaded</div>';
+  badge.textContent = `${loadedCount}/${totalSources} loaded`;
+
+  document.getElementById('sec-ti-ips').textContent = data.observed_ips?.toLocaleString() || '0';
+  document.getElementById('sec-ti-domains').textContent = data.observed_domains?.toLocaleString() || '0';
+}
+
+function formatAge(seconds) {
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
+}
+
+// ═══════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════
 async function init() {
@@ -3104,7 +3446,12 @@ function fetchVersion() {
     });
 }
 
-init();
+(async function boot() {
+  const authed = await checkAuth();
+  if (authed) {
+    init();
+  }
+})();
 </script>
 
 <div id="version-footer" style="text-align:center;padding:16px 20px 24px;font-size:0.65rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;position:relative;z-index:1">
