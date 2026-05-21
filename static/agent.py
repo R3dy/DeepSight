@@ -7,8 +7,11 @@ Usage:
   python3 agent.py                          # uses config.json in same dir
   python3 agent.py --host my-server \       # override hostname
       --collector https://IP:8451 \
-      --secret my-key \
+      --api-key dsk_... \
       --interval 3
+
+DeepSight 0.4.0+: Use --api-key instead of --secret.
+API keys are created from the dashboard (Settings → API Keys).
 """
 
 import json
@@ -29,6 +32,17 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# ── Agent version ──
+AGENT_VERSION = "0.0.0"
+try:
+    _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    if not os.path.exists(_vf):
+        _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "VERSION")
+    if os.path.exists(_vf):
+        with open(_vf) as f:
+            AGENT_VERSION = f.read().strip()
+except Exception:
+    pass
 
 # ═══════════════════════════════════════════
 # Pure-stdlib fallback collectors
@@ -378,6 +392,7 @@ def collect_all():
         "disks": disks,
         "ram_processes": ram_procs,
         "cpu_processes": cpu_procs,
+        "agent_version": AGENT_VERSION,
     }
 
 
@@ -427,7 +442,8 @@ def load_config():
     parser = argparse.ArgumentParser(description="System Dashboard Agent")
     parser.add_argument("--host", help="Host identifier (default: hostname)")
     parser.add_argument("--collector", help="Collector URL")
-    parser.add_argument("--secret", help="Shared secret")
+    parser.add_argument("--secret", help="Shared secret (legacy, prefer --api-key)")
+    parser.add_argument("--api-key", help="API key from DeepSight dashboard (preferred)")
     parser.add_argument("--interval", type=int, help="Report interval in seconds")
     args = parser.parse_args()
 
@@ -435,6 +451,8 @@ def load_config():
         defaults["host"] = args.host
     if args.collector:
         defaults["collector_url"] = args.collector.rstrip("/")
+    if args.api_key:
+        defaults["api_key"] = args.api_key
     if args.secret:
         defaults["secret"] = args.secret
     if args.interval:
@@ -446,9 +464,12 @@ def load_config():
 def report(config, stats):
     """POST stats to collector."""
     url = f"{config['collector_url']}/api/report"
+    # Prefer api_key (0.4.0+) over secret (legacy)
+    auth_field = "api_key" if config.get("api_key") else "secret"
+    auth_value = config.get("api_key") or config.get("secret", "")
     payload = {
         "host": config["host"],
-        "secret": config["secret"],
+        auth_field: auth_value,
         "timestamp": time.time(),
         **stats,
     }
