@@ -26,6 +26,13 @@ except ImportError:
     def _dispatch_notification(alert):
         pass  # notifier.py not available
 
+# ── Optional syslog integration ──
+try:
+    import syslog_ingest
+    HAS_SYSLOG = True
+except ImportError:
+    HAS_SYSLOG = False
+
 # ── Optional imports ──
 try:
     import psutil
@@ -533,6 +540,28 @@ def evaluate_rules(event_type, data):
             mitre_tactic="Defense Evasion",
             mitre_technique="T1564 (Hide Artifacts)",
             process_pid=data.get("pid"),
+        )
+        if a:
+            alerts.append(a)
+
+    elif event_type == "syslog_alert":
+        # Syslog alerts are created directly by syslog_ingest.py via create_alert().
+        # This handler exists for completeness — external syslog events that
+        # arrived while detection was starting can be replayed through here.
+        severity = data.get("severity", "medium")
+        category = data.get("category", "syslog")
+        title = data.get("title", "Syslog alert")
+        description = data.get("description", "")
+        source_ip = data.get("source_ip", "")
+        a = create_alert(
+            severity=severity,
+            category=category,
+            title=title,
+            description=description,
+            source_ip=source_ip,
+            mitre_tactic=data.get("mitre_tactic", ""),
+            mitre_technique=data.get("mitre_technique", ""),
+            raw_data=data.get("raw_data", {}),
         )
         if a:
             alerts.append(a)
@@ -1748,6 +1777,41 @@ def get_file_events(hours=24, limit=200):
         return []
 
 
+# ── Syslog event accessors (delegate to syslog_ingest) ──
+
+def get_syslog_events(host=None, facility=None, limit=100):
+    """Query syslog events with optional filters."""
+    if not HAS_SYSLOG:
+        return []
+    try:
+        return syslog_ingest.get_events(host=host, facility=facility, limit=limit)
+    except Exception as e:
+        _log(f"get_syslog_events error: {e}")
+        return []
+
+
+def get_syslog_hosts():
+    """Return distinct syslog hosts."""
+    if not HAS_SYSLOG:
+        return []
+    try:
+        return syslog_ingest.get_distinct_hosts()
+    except Exception as e:
+        _log(f"get_syslog_hosts error: {e}")
+        return []
+
+
+def get_syslog_facilities():
+    """Return distinct syslog facilities."""
+    if not HAS_SYSLOG:
+        return []
+    try:
+        return syslog_ingest.get_distinct_facilities()
+    except Exception as e:
+        _log(f"get_syslog_facilities error: {e}")
+        return []
+
+
 def get_security_summary():
     """Aggregated security summary for the dashboard."""
     try:
@@ -1809,6 +1873,14 @@ def get_security_summary():
             ORDER BY count DESC LIMIT 5
         """).fetchall()
 
+        # Syslog event count (last 1h)
+        syslog_count_1h = 0
+        if HAS_SYSLOG:
+            try:
+                syslog_count_1h = syslog_ingest.get_event_count(hours=1)
+            except Exception:
+                pass
+
         return {
             "active_alerts": severity_counts,
             "total_active_alerts": sum(severity_counts.values()),
@@ -1823,6 +1895,9 @@ def get_security_summary():
                 "events_1h": file_event_count,
                 "recent": [dict(r) for r in recent_file_events],
             },
+            "syslog": {
+                "events_1h": syslog_count_1h,
+            },
             "summary_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     except Exception as e:
@@ -1833,6 +1908,7 @@ def get_security_summary():
             "beaconing_processes": [],
             "auth": {"failures_1h": 0, "successes_1h": 0, "recent_events": [], "top_source_ips": []},
             "file_integrity": {"events_1h": 0, "recent": []},
+            "syslog": {"events_1h": 0},
             "summary_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
@@ -1910,6 +1986,14 @@ def start_collectors():
     # Start packet sniffer for HTTP/TLS metadata (runs independently)
     _start_packet_sniffer()
 
+    # Start syslog ingestion if available
+    if HAS_SYSLOG:
+        try:
+            syslog_ingest.start_server()
+            _log(f"Syslog ingestion started (port: {syslog_ingest.DEFAULT_PORT})")
+        except Exception as e:
+            _log(f"Syslog ingestion failed to start: {e}")
+
     collectors = [
         ("process_audit", process_audit_collector),
         ("beaconing", beaconing_collector),
@@ -1931,6 +2015,11 @@ def stop_collectors():
     """Signal collectors to stop (daemon threads will exit on process termination)."""
     global _collectors_running
     _collectors_running = False
+    if HAS_SYSLOG:
+        try:
+            syslog_ingest.stop_server()
+        except Exception:
+            pass
     _log("Collectors stopping (daemon threads will exit)")
 
 

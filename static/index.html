@@ -877,6 +877,77 @@
     color: var(--text-primary);
   }
 
+  /* Syslog / External Logs widget */
+  .sec-syslog-toolbar {
+    display: flex; gap: 10px; padding: 8px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .sec-syslog-filter {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+    background: var(--bg-card); color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 4px 10px; cursor: pointer; outline: none;
+    transition: border-color 0.2s; min-width: 140px;
+  }
+  .sec-syslog-filter:hover { border-color: rgba(139,92,246,0.3); }
+  .sec-syslog-filter:focus { border-color: var(--accent-violet); }
+
+  .sec-syslog-list {
+    display: flex; flex-direction: column;
+    max-height: 400px; overflow-y: auto;
+  }
+  .sec-syslog-list::-webkit-scrollbar { width: 4px; }
+  .sec-syslog-list::-webkit-scrollbar-track { background: transparent; }
+  .sec-syslog-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .sec-syslog-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.02);
+    font-size: 0.64rem; transition: background 0.15s;
+  }
+  .sec-syslog-row:hover { background: rgba(255,255,255,0.015); }
+
+  .sec-syslog-time {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--text-muted); white-space: nowrap; min-width: 52px;
+  }
+  .sec-syslog-severity {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.55rem;
+    font-weight: 700; text-transform: uppercase; padding: 1px 6px;
+    border-radius: 3px; white-space: nowrap; letter-spacing: 0.04em;
+  }
+  .sec-syslog-severity.emerg, .sec-syslog-severity.alert, .sec-syslog-severity.crit {
+    background: rgba(239,68,68,0.12); color: var(--accent-red);
+  }
+  .sec-syslog-severity.err {
+    background: rgba(249,115,22,0.12); color: var(--accent-orange);
+  }
+  .sec-syslog-severity.warning {
+    background: rgba(245,158,11,0.12); color: var(--accent-yellow);
+  }
+  .sec-syslog-severity.notice {
+    background: rgba(139,92,246,0.12); color: var(--accent-violet);
+  }
+  .sec-syslog-severity.info {
+    background: rgba(6,182,212,0.12); color: var(--accent-cyan);
+  }
+  .sec-syslog-severity.debug {
+    background: rgba(255,255,255,0.06); color: var(--text-muted);
+  }
+  .sec-syslog-host {
+    font-family: 'JetBrains Mono', monospace; font-weight: 600;
+    font-size: 0.64rem; color: var(--accent-amber); white-space: nowrap;
+  }
+  .sec-syslog-facility {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.55rem;
+    color: var(--text-muted); padding: 1px 5px; border-radius: 3px;
+    background: rgba(255,255,255,0.03); white-space: nowrap;
+  }
+  .sec-syslog-message {
+    color: var(--text-secondary); flex: 1;
+    word-break: break-all; line-height: 1.35;
+  }
+
   @media (max-width: 860px) {
     .sec-summary-row { grid-template-columns: repeat(2, 1fr); }
     .sec-alerts-list { max-height: 360px; }
@@ -1216,6 +1287,25 @@
         <span class="card-badge" id="sec-files-badge">last hour</span>
       </div>
       <div class="sec-file-scroll" id="sec-file-scroll">
+        <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+      </div>
+    </div>
+
+    <!-- ROW 5: External Logs (Syslog) -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">📋 External Logs</span>
+        <span class="card-badge" id="sec-syslog-badge">syslog</span>
+      </div>
+      <div class="sec-syslog-toolbar">
+        <select class="sec-syslog-filter" id="syslog-host-filter" onchange="fetchSyslogEvents()">
+          <option value="">All Hosts</option>
+        </select>
+        <select class="sec-syslog-filter" id="syslog-facility-filter" onchange="fetchSyslogEvents()">
+          <option value="">All Facilities</option>
+        </select>
+      </div>
+      <div class="sec-syslog-list" id="sec-syslog-list">
         <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
       </div>
     </div>
@@ -2602,12 +2692,14 @@ function startSecurityPolling() {
   fetchBeaconing();
   fetchAuthEvents();
   fetchFileEvents();
+  fetchSyslogEvents();
   // Set up separate intervals
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSecuritySummary(); }, 5000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchAlerts(); }, 5000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchBeaconing(); }, 10000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchAuthEvents(); }, 5000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchFileEvents(); }, 10000));
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSyslogEvents(); }, 10000));
 }
 
 function stopSecurityPolling() {
@@ -2895,6 +2987,74 @@ function renderFileEventsError(msg) {
   document.getElementById('sec-file-scroll').innerHTML =
     '<div class="sec-error">⚠️ ' + msg + '</div>';
   document.getElementById('sec-files-badge').textContent = 'error';
+}
+
+// ═══════════════════════════════════════════
+// Syslog / External Logs
+// ═══════════════════════════════════════════
+let lastSyslogEvents = null;
+
+async function fetchSyslogEvents() {
+  try {
+    const host = document.getElementById('syslog-host-filter')?.value || '';
+    const facility = document.getElementById('syslog-facility-filter')?.value || '';
+    let url = '/api/syslog-events?limit=100';
+    if (host) url += '&host=' + encodeURIComponent(host);
+    if (facility) url += '&facility=' + encodeURIComponent(facility);
+
+    const res = await fetch(url);
+    const data = await res.json();
+    lastSyslogEvents = data;
+    securityDataReady = true;
+    renderSyslogEvents(data);
+  } catch (e) {
+    if (!securityDataReady) renderSyslogEventsError('External logs unavailable');
+  }
+}
+
+function renderSyslogEvents(data) {
+  const el = document.getElementById('sec-syslog-list');
+  document.getElementById('sec-syslog-badge').textContent = (data.count || 0) + ' events';
+
+  // Update host dropdown if hosts changed
+  const hostFilter = document.getElementById('syslog-host-filter');
+  const currentHostVal = hostFilter.value;
+  if (data.hosts && data.hosts.length) {
+    hostFilter.innerHTML = '<option value="">All Hosts</option>' +
+      data.hosts.map(h => `<option value="${escHtml(h)}"${h === currentHostVal ? ' selected' : ''}>${escHtml(h)}</option>`).join('');
+  }
+
+  // Update facility dropdown
+  const facFilter = document.getElementById('syslog-facility-filter');
+  const currentFacVal = facFilter.value;
+  if (data.facilities && data.facilities.length) {
+    facFilter.innerHTML = '<option value="">All Facilities</option>' +
+      data.facilities.map(f => `<option value="${escHtml(f)}"${f === currentFacVal ? ' selected' : ''}>${escHtml(f)}</option>`).join('');
+  }
+
+  if (!data.events || !data.events.length) {
+    el.innerHTML = '<div class="sec-empty"><span class="sec-empty-icon">📋</span>No syslog events received. Point a device at this server on UDP port 514.</div>';
+    return;
+  }
+
+  let html = '';
+  data.events.forEach(e => {
+    const sev = (e.severity || 'info').toLowerCase();
+    html += `<div class="sec-syslog-row">
+      <span class="sec-syslog-time">${relativeTime(e.timestamp)}</span>
+      <span class="sec-syslog-severity ${sev}">${e.severity || 'info'}</span>
+      <span class="sec-syslog-host" title="${escHtml(e.host || '')}">${escHtml((e.host || '?').substring(0, 20))}</span>
+      <span class="sec-syslog-facility">${escHtml(e.facility || '?')}</span>
+      <span class="sec-syslog-message">${escHtml((e.message || '').substring(0, 200))}</span>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function renderSyslogEventsError(msg) {
+  document.getElementById('sec-syslog-list').innerHTML =
+    '<div class="sec-error">⚠️ ' + msg + '</div>';
+  document.getElementById('sec-syslog-badge').textContent = 'error';
 }
 
 // ═══════════════════════════════════════════

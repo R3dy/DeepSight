@@ -5,6 +5,18 @@ All notable changes to DeepSight will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-21
+
+### Added
+- UDP syslog ingestion server (`syslog_ingest.py`) on configurable port 514
+- RFC 3164 (BSD) and RFC 5424 (IETF) syslog message parsing with auto-detection
+- SQLite storage for syslog events with indexed host/facility/severity columns
+- Security alert rules for incoming syslog: firewall DENY floods, device auth failures, NAS external logins, port scan detection
+- External Logs widget in Security view with host/facility filter dropdowns and scrollable message feed
+- `GET /api/syslog-events` and `GET /api/syslog-hosts` API endpoints with filtering
+- Example config at `config/syslog.example.toml` with device configuration guides
+- Syslog integration tests (27 new test cases)
+
 ## [0.2.0] — 2026-05-21
 
 ### Added
