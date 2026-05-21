@@ -33,6 +33,13 @@ try:
 except ImportError:
     HAS_SYSLOG = False
 
+# ── Optional threat intel integration ──
+try:
+    import threat_intel
+    HAS_THREAT_INTEL = True
+except ImportError:
+    HAS_THREAT_INTEL = False
+
 # ── Optional imports ──
 try:
     import psutil
@@ -820,6 +827,22 @@ def _collect_outbound_connections():
                 "tls_sni": http_meta.get("sni", ""),
                 "user_agent": http_meta.get("ua", ""),
             })
+
+            # Feed observed IPs/domains into threat intel
+            if HAS_THREAT_INTEL:
+                try:
+                    threat_intel.record_observed_ip(
+                        remote_ip, host=socket.gethostname(), port=remote_port,
+                        protocol=http_meta.get("sni", "") or "tcp"
+                    )
+                    if http_meta.get("sni"):
+                        resolved = remote_ip if not remote_ip.startswith("192.") else ""
+                        threat_intel.record_observed_domain(
+                            http_meta["sni"], host=socket.gethostname(),
+                            resolved_ip=resolved
+                        )
+                except Exception:
+                    pass
     except Exception as e:
         pass
 
@@ -1993,6 +2016,14 @@ def start_collectors():
             _log(f"Syslog ingestion started (port: {syslog_ingest.DEFAULT_PORT})")
         except Exception as e:
             _log(f"Syslog ingestion failed to start: {e}")
+
+    # Start threat intel integration if available
+    if HAS_THREAT_INTEL:
+        try:
+            threat_intel.start_collector()
+            _log("Threat intel collector started")
+        except Exception as e:
+            _log(f"Threat intel collector failed to start: {e}")
 
     collectors = [
         ("process_audit", process_audit_collector),
