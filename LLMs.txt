@@ -1,0 +1,304 @@
+# LLMs.txt — DeepSight System Dashboard
+
+> Context map for LLMs working with this codebase.
+> Start here. Then read the focused LLM files for deeper dives.
+> Discord: `#general` (channel `1506832293363318874`)
+
+## Focused LLM Files
+
+| File | Scope |
+|------|-------|
+| `AGENTS.md` | Architecture, conventions, design constraints |
+| `server.py` | Flask API, stats collection, routes |
+| `detection.py` | SIEM engine, collectors, alert rules |
+| `static/index.html` | SPA frontend (~2930 LOC) |
+| `static/agent.py` | Remote agent |
+| `static/add-host.html` | Agent install UI |
+| `docs/architecture.md` | Architecture documentation |
+
+## Stack
+
+- **Backend:** Python 3.8+, Flask, psutil, SQLite (WAL)
+- **Frontend:** Vanilla HTML/CSS/JS, Chart.js 4.4.0, Inter + JetBrains Mono
+- **Docs:** VitePress (npm)
+- **Deploy:** Flask dev server on 127.0.0.1:8451, Tailscale Serve for HTTPS
+- **Agent:** Python 3 stdlib (psutil optional), systemd service
+
+## Server (`server.py`)
+
+### Key Types
+
+```python
+# Host entry
+HOSTS[hostname] = {
+    "last_seen": float,    # epoch seconds
+    "stats": dict,         # full stats shape (see /api/stats response)
+    "status": "online" | "stale",
+}
+
+# Stats shape (from collect_local_stats())
+{
+    "memory": {...},       # total_gb, used_gb, hard_used_gb, kernel_reserved_gb, etc.
+    "swap": {...},         # total_gb, used_gb, percent
+    "cpu": {
+        "percent": float, "cores": [float, ...],
+        "core_count_logical": int, "core_count_physical": int,
+        "freq_current": int, "freq_max": int,
+        "load_1m": float, "load_5m": float, "load_15m": float,
+    },
+    "gpu": {
+        "name": str, "usage": int, "vram_used": int, "vram_total": int,
+        "vram_used_gb": float, "vram_total_gb": float, "gtt_used": int, "gtt_used_gb": float,
+    },
+    "disks": [{"device", "mountpoint", "fstype", "total", "used", "free", "percent", ...}, ...],
+    "ram_processes": [{"pid", "name", "memory", "memory_gb", "ram_percent", "cpu_percent"}, ...],
+    "cpu_processes": [{"pid", "name", "memory", "memory_gb", "ram_percent", "cpu_percent"}, ...],
+}
+
+# Deep data (from collect_deep_data(), when detail=true)
+{
+    "meminfo": {...},          # /proc/meminfo parsed fields in GB
+    "memory_pressure": {...},  # PSI some_avg10/60/300
+    "swappiness": int,
+    "cpu_stat": {...},         # user/system/idle/iowait/irq/softirq/steal/nice pct
+    "context_switches": {"per_sec": int, "total": int, "boot_time": int},
+    "cpu_temp": {"label": str, "temp_c": float},
+    "deep_processes": [{  # top 36 by RSS with PSS/USS
+        "pid", "name", "user", "status", "threads",
+        "rss_mb", "pss_mb", "uss_mb", "swap_pss_mb",
+        "cpu_percent", "cpu_user_s", "cpu_system_s",
+    }, ...],
+    "disk_io": {disk: {"read_kbps", "write_kbps", "read_iops", "write_iops", ...}, ...},
+    "inode_usage": [{"mountpoint", "inode_total", "inode_used", "inode_pct"}, ...],
+    "gpu_deep": {"name", "usage", "vram_used_gb", "vram_total_gb", "temp_c", "power_w", "sclk_mhz", "mclk_mhz"},
+}
+
+# Process detail shape (/api/process/<pid>)
+{
+    "pid": int, "found": bool,
+    "name": str, "user": str, "state": str, "threads": int,
+    "cmdline": str, "argv": [str, ...],
+    "vm_size_mb": float, "vm_rss_mb": float, "vm_data_mb": float,
+    "vm_stk_mb": float, "vm_exe_mb": float, "vm_lib_mb": float, "vm_swap_mb": float,
+    "voluntary_ctxt_switches": int, "nonvoluntary_ctxt_switches": int,
+    "fd_count": int, "fd_samples": [{"fd": str, "target": str}, ...],
+    "children": [int, ...], "child_count": int,
+    "child_details": [{"pid": int, "name": str}, ...],
+    "network_connections": [{"proto": str, "local": str, "remote": str, "state": str}, ...],
+    "environ": {str: str, ...},
+    "cpu_user_s": float, "cpu_system_s": float, "cpu_percent": float,
+    "create_time": float,
+}
+```
+
+### Important Functions
+
+- `collect_local_stats()` — main stats collector (psutil + /proc/sys)
+- `compute_memory_stats(mem)` — breaks memory into hard_used, kernel_reserved, cached, buffers, free
+- `collect_deep_data()` — full deep dive (meminfo, pressure, PSS/USS, disk I/O, GPU details)
+- `collect_network_stats()` — TCP/UDP connections from /proc/net/* + ss
+- `collect_outbound_http()` — external HTTP/HTTPS connections via ss -tnp
+- `collect_process_detail(pid)` — /proc/pid/* forensic read
+- `collect_users()` — w command + psutil.users()
+- `collect_meminfo_deep()` — full /proc/meminfo parsing
+- `collect_cpu_stat_deep()` — /proc/stat breakdown
+- `collect_context_switches()` — delta-based ctxt/s
+- `collect_cpu_temp()` — hwmon + thermal_zone
+- `collect_process_deep(top_n)` — PSS/USS from smaps_rollup
+- `collect_disk_io()` / `collect_disk_io_delta()` — per-disk I/O stats
+- `collect_inode_usage()` — statvfs inode counts
+- `collect_gpu_deep()` — sysfs GPU temp/clocks/power
+
+## Detection Engine (`detection.py`)
+
+### Key Types
+
+```python
+# Alert (from create_alert)
+{
+    "id": int, "timestamp": str, "severity": "critical"|"high"|"medium"|"low",
+    "category": str, "title": str, "description": str,
+    "source_host": str, "source_ip": str,
+    "mitre_tactic": str, "mitre_technique": str,
+    "process_pid": int, "process_name": str,
+    "raw_data": dict, "acknowledged": bool,
+}
+
+# Beaconing event (DB row)
+{
+    "id", "timestamp", "process_name", "pid",
+    "remote_ip", "remote_host", "remote_port", "src_port",
+    "interval_seconds", "confidence", "sample_count",
+    "http_method", "http_path", "http_query", "tls_sni", "user_agent",
+}
+
+# Auth event (DB row)
+{"id", "timestamp", "event_type", "username", "source_ip", "details", "count_window_10s"}
+
+# Security summary
+{
+    "active_alerts": {"critical": n, "high": n, "medium": n, "low": n},
+    "total_active_alerts": int,
+    "beaconing_processes": [...],
+    "auth": {"failures_1h": int, "successes_1h": int, "recent_events": [...], "top_source_ips": [...]},
+    "file_integrity": {"events_1h": int, "recent": [...]},
+}
+```
+
+### Important Functions
+
+- `start_collectors()` — launch all background threads + packet sniffer
+- `evaluate_rules(event_type, data)` — main rule evaluation dispatch
+- `create_alert(severity, category, title, ...)` — insert alert with dedup
+- `process_audit_collector()` — scan new PIDs for reverse shells, webshells, suspicious paths
+- `beaconing_collector()` — timing variance analysis on outbound connections
+- `auth_monitor()` — parse /var/log/auth.log for SSH/sudo/su events
+- `dns_collector()` — entropy analysis on resolved domains
+- `file_integrity_collector()` — inotify or polling for sensitive file changes
+- `_start_packet_sniffer()` / `_packet_sniffer_loop()` — tcpdump-based HTTP/TLS metadata capture
+- `_parse_flow_payload()` — parse TCP payload for HTTP method/path or TLS SNI
+- `get_alerts()`, `get_beaconing()`, `get_auth_events()`, `get_file_events()`, `get_security_summary()` — API query functions
+- `acknowledge_alert(alert_id)` — mark acknowledged
+- `get_alert_stats(hours)` — severity/category counts
+
+### Threshold Constants
+
+- `SSH_BRUTE_FORCE_COUNT = 5` (in 10s window)
+- `BEACONING_CONFIDENCE_MIN = 0.7`
+- `BEACONING_MIN_SAMPLES = 5`
+- `BEACONING_WINDOW_S = 180`
+- `BEACONING_VARIANCE_MAX = 0.05` (5% drift = beacon-like)
+- `DGA_ENTROPY_THRESHOLD = 3.5` (flagged as suspicious)
+- `DGA_ALERT_THRESHOLD = 3.8` (alert fired)
+- `ALERT_DEDUP_WINDOW_S = 300`
+
+## Frontend (`static/index.html`)
+
+### Global State Variables
+
+```javascript
+currentHost, allHosts, currentView  // host & view state
+lastDetailData, lastClusterData, lastNetworkData, lastHostsData  // response caches
+lastRamPct, lastCpuPct, lastGpuPct  // gauge change detection
+currentProcTab, procSortCol, procSortDir  // process table state
+tooltipCache, tooltipTimer  // process tooltip state
+securityPollIntervals, securityAlertAcked  // security view state
+clusterRamChart, clusterCpuChart  // Chart.js instances
+lastSecuritySummary, lastAlerts, lastBeaconing, lastAuthEvents, lastFileEvents  // security caches
+```
+
+### Key Functions
+
+- `init()` — bootstrap: fetch hosts, start polling intervals
+- `updateDashboard(data)` — main detail view render: RAM/CPU/GPU gauges, process tables, disks
+- `renderProcTable(data)` — unified process table (RAM or CPU tab)
+- `showProcessDetail(pid)` / `renderProcessDetail(p)` — forensic modal
+- `showProcTooltip(pid, e)` / `hideProcTooltip()` — hover tooltip (200ms debounce)
+- `fetchNetwork()` / `renderNetworkWidget(data)` — TCP listeners + outbound HTTP
+- `fetchUsers()` — logged-in users widget
+- `buildDiskList(disks)` — disk usage bars
+- `expandView(type)` — deep-dive modal dispatch
+- `renderRamDeepDive(data)`, `renderCpuDeepDive(data)`, `renderDiskDeepDive(data)`, `renderGpuDeepDive(data)`, `renderNetworkDeepDive()` — expanded modals
+- `fetchOverview()` / `renderCluster(data)` — cluster overview with Chart.js charts
+- `switchView(view)` — tab navigation (detail/overview/security)
+- `startSecurityPolling()` / `stopSecurityPolling()` — security view lifecycle
+- `fetchSecuritySummary()`, `fetchAlerts()`, `fetchBeaconing()`, `fetchAuthEvents()`, `fetchFileEvents()` — security data fetches
+- `renderAlerts(alerts)`, `renderBeaconing(beacons)`, `renderAuthEvents(events)`, `renderFileEvents(events)` — security view renders
+- `acknowledgeAlert(id, el)` — POST ack + optimistic UI
+- `escHtml(s)` — XSS prevention
+- `relativeTime(ts)` — human-readable timestamps
+
+### Color Palette (CSS Variables)
+
+```css
+--bg-deep: #06060e;      /* background */
+--bg-card: #0f0f1a;      /* card surface */
+--border: #1e1e36;        /* borders */
+--text-primary: #e8ecf2;  /* primary text */
+--text-secondary: #8892a8;/* secondary text */
+--text-muted: #5a6378;    /* muted text */
+--accent-violet: #8b5cf6; /* brand / RAM */
+--accent-cyan: #06b6d4;   /* network / NPCs */
+--accent-green: #10b981;  /* success / healthy */
+--accent-yellow: #f59e0b; /* warning / cached */
+--accent-orange: #f97316; /* caution / CPU */
+--accent-red: #ef4444;    /* danger / critical */
+--accent-pink: #ec4899;   /* GPU */
+```
+
+### View IDs
+
+- `#detail-view` / `#overview-view` / `#security-view` — main containers
+- `#ramGauge`, `#cpuGauge`, `#gpuGauge` — Chart.js gauge canvases
+- `#proc-table-body` — process table tbody
+- `#proc-tooltip` — hover tooltip div
+- `#modal-overlay` / `#modal-title` / `#modal-body` — full-screen modal
+- `#host-select` — host dropdown
+- `#breakdown-bars` — RAM breakdown segments
+- `#core-grid` / `#core-labels` — per-core CPU bars
+
+## Agent (`static/agent.py`)
+
+### Key Functions
+
+- `collect_all()` — gather all stats
+- `collect_memory_proc()` / `_collect_memory_psutil()` — memory (fallback vs psutil)
+- `collect_cpu()` — CPU with /proc/stat delta fallback
+- `collect_gpu()` — GPU from sysfs
+- `collect_disks()` — disk usage (psutil or statvfs)
+- `collect_processes(mem_total)` — top processes (psutil or /proc/statm)
+- `load_config()` — config.json + CLI args
+- `report(config, stats)` — POST to collector
+- `main()` — agent loop
+
+### Config Shape
+
+```json
+{
+    "collector_url": "https://open-claw01.tail9058f7.ts.net:8451",
+    "secret": "sysdash-agent-key-2026",
+    "host": "hostname",
+    "interval": 2
+}
+```
+
+## Common Operations
+
+### Restart the server
+```bash
+kill $(pgrep -f "python3 server.py") && cd ~/apps/ram-dashboard && python3 server.py &
+```
+Do NOT use `pkill -f "python3 server.py"` — it kills the invoking shell.
+
+### Check service health
+```bash
+curl -k -s https://open-claw01.tail9058f7.ts.net:8451/ | head -5
+```
+
+### Run detection standalone
+```bash
+cd ~/apps/ram-dashboard && python3 detection.py
+```
+
+### Build docs
+```bash
+cd ~/apps/ram-dashboard && npm run docs:build
+```
+
+### Add a host
+```bash
+curl -sSL https://open-claw01.tail9058f7.ts.net:8451/install.sh | sudo bash
+```
+
+## Known Gotchas
+
+1. **Bind bug**: After process crash/reboot, server may bind to Tailscale IP → 502. Fix: kill + restart.
+2. **tcpdump permission**: Packet sniffer needs `cap_net_raw`. Set with `sudo setcap cap_net_raw,cap_net_admin=eip /usr/bin/tcpdump`.
+3. **No collect_local_stats return type contract** — deep collectors return inconsistent dict shapes. Always use `.get()` defensively.
+4. **process_audit_collector has a duplicate function definition** — `collect_local_stats()` is defined twice in server.py (first is a stub). The real body starts after `compute_memory_stats()`.
+5. **Network data is collector-only** — agents don't report network connections. The frontend shows a placeholder for non-collector hosts.
+6. **VitePress docs output dir** — `outDir: '../static/docs'`, served from Flask static route.
+7. **Chart.js destroy/recreate** — cluster charts need `destroy()` before new `Chart()` when switching views.
+8. **Process audit scans only NEW PIDs** — uses `_seen_pids` set, skips existing processes on startup.
+9. **Auth log monitoring is local-only** — only reads collector host's `/var/log/auth.log`.
+10. **inotify_simple is optional** — gracefully degrades to mtime polling if not installed.

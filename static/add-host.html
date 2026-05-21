@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Add Host — DeepSight</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --bg-deep: #06060e;
+    --bg-card: #0f0f1a;
+    --border: #1e1e36;
+    --text-primary: #e8ecf2;
+    --text-secondary: #8892a8;
+    --text-muted: #5a6378;
+    --accent-violet: #8b5cf6;
+    --accent-violet-glow: rgba(139, 92, 246, 0.25);
+    --accent-cyan: #06b6d4;
+    --accent-green: #10b981;
+    --accent-yellow: #f59e0b;
+    --radius: 14px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: '';
+    position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(139,92,246,0.04) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 60%, rgba(6,182,212,0.03) 0%, transparent 50%);
+    pointer-events: none; z-index: 0;
+  }
+
+  .container {
+    position: relative; z-index: 1; max-width: 640px; width: 100%;
+  }
+
+  .back-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--text-secondary); text-decoration: none;
+    font-size: 0.8rem; margin-bottom: 20px;
+    transition: color 0.2s;
+  }
+  .back-link:hover { color: var(--text-primary); }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 32px;
+  }
+  .card h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.3rem; font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .card .subtitle {
+    color: var(--text-secondary); font-size: 0.82rem;
+    margin-bottom: 28px;
+  }
+
+  .step {
+    margin-bottom: 24px;
+  }
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent-violet);
+    font-size: 0.72rem; font-weight: 700;
+    margin-right: 8px; flex-shrink: 0;
+  }
+  .step h3 {
+    font-size: 0.85rem; font-weight: 600;
+    display: inline; vertical-align: middle;
+  }
+  .step p {
+    color: var(--text-secondary); font-size: 0.78rem;
+    margin-top: 4px; margin-left: 32px;
+  }
+
+  .code-block {
+    position: relative;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0 12px 32px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--accent-cyan);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .copy-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+    color: var(--text-secondary); font-size: 0.65rem; font-weight: 600;
+    padding: 4px 10px; border-radius: 4px;
+    cursor: pointer; transition: all 0.2s;
+    font-family: 'Inter', sans-serif;
+  }
+  .copy-btn:hover { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+  .copy-btn.copied { background: var(--accent-green); color: #000; border-color: var(--accent-green); }
+
+  .note {
+    background: rgba(139,92,246,0.08);
+    border-left: 2px solid var(--accent-violet);
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-top: 20px;
+  }
+  .note strong { color: var(--text-primary); }
+
+  @media (max-width: 500px) {
+    .card { padding: 20px; }
+    .code-block { font-size: 0.65rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back-link">← Back to Dashboard</a>
+  <div class="card">
+    <h2>⚡ Add a New Host</h2>
+    <p class="subtitle">Run this command on any Linux machine to start reporting to this dashboard.</p>
+
+    <div class="step">
+      <span class="step-num">1</span><h3>Run the install command</h3>
+      <p>SSH into the target host and run this single command as root:</p>
+      <div class="code-block" id="install-cmd">
+curl -sSL https://open-claw01.tail9058f7.ts.net:8451/install.sh | sudo bash
+        <button class="copy-btn" onclick="copyCommand()">Copy</button>
+      </div>
+    </div>
+
+    <div class="step">
+      <span class="step-num">2</span><h3>What it does</h3>
+      <p>
+        Downloads the agent script → installs Python deps → creates a systemd service → starts reporting.
+        The agent sends RAM, CPU, GPU, disk, and process stats every 2 seconds.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-num">3</span><h3>Verify it's working</h3>
+      <p>On the remote host, check the service status:</p>
+      <div class="code-block">
+systemctl status sysdash-agent
+journalctl -u sysdash-agent -f
+      </div>
+    </div>
+
+    <div class="step">
+      <span class="step-num">4</span><h3>Select the host</h3>
+      <p>Go back to the dashboard and select the new host from the dropdown menu in the header.</p>
+    </div>
+
+    <div class="note">
+      <strong>Requirements:</strong> Linux with Python 3 and systemd.<br>
+      <strong>To remove:</strong> <code style="color:var(--accent-cyan);font-size:0.7rem">sudo systemctl disable --now sysdash-agent && sudo rm -rf /opt/sysdash-agent /etc/systemd/system/sysdash-agent.service</code><br>
+      <strong>Custom hostname:</strong> edit <code style="color:var(--accent-cyan);font-size:0.7rem">/opt/sysdash-agent/config.json</code> and change the <code style="color:var(--accent-cyan);font-size:0.7rem">"host"</code> field.
+    </div>
+  </div>
+</div>
+
+<script>
+function copyCommand() {
+  const text = "curl -sSL https://open-claw01.tail9058f7.ts.net:8451/install.sh | sudo bash";
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+</script>
+</body>
+</html>

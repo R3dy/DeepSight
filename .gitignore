@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+data/alerts.db
+data/alerts.db-shm
+data/alerts.db-wal
+static/docs/
+node_modules/
+.DS_Store
+*.log

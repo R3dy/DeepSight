@@ -1,0 +1,209 @@
+/* DeepSight VitePress Theme — matches dashboard aesthetic */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --vp-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', monospace;
+
+  --vp-c-bg: #06060e;
+  --vp-c-bg-alt: #0f0f1a;
+  --vp-c-bg-elv: #0f0f1a;
+  --vp-c-bg-soft: #0a0a14;
+  --vp-c-bg-mute: #161628;
+
+  --vp-c-border: #1e1e36;
+  --vp-c-divider: #1e1e36;
+  --vp-c-gutter: #1e1e36;
+
+  --vp-c-text-1: #e8ecf2;
+  --vp-c-text-2: #8892a8;
+  --vp-c-text-3: #5a6378;
+
+  --vp-c-brand-1: #8b5cf6;
+  --vp-c-brand-2: #7c3aed;
+  --vp-c-brand-3: #6d28d9;
+  --vp-c-brand-soft: rgba(139, 92, 246, 0.14);
+
+  --vp-c-tip-1: #06b6d4;
+  --vp-c-tip-2: #0891b2;
+  --vp-c-tip-3: #0e7490;
+  --vp-c-tip-soft: rgba(6, 182, 212, 0.12);
+
+  --vp-c-warning-1: #f59e0b;
+  --vp-c-warning-2: #d97706;
+  --vp-c-warning-3: #b45309;
+  --vp-c-warning-soft: rgba(245, 158, 11, 0.12);
+
+  --vp-c-danger-1: #ef4444;
+  --vp-c-danger-2: #dc2626;
+  --vp-c-danger-3: #b91c1c;
+  --vp-c-danger-soft: rgba(239, 68, 68, 0.12);
+
+  --vp-c-green-1: #10b981;
+  --vp-c-green-2: #059669;
+  --vp-c-green-3: #047857;
+
+  --vp-button-brand-bg: #8b5cf6;
+  --vp-button-brand-hover-bg: #7c3aed;
+  --vp-button-brand-active-bg: #6d28d9;
+  --vp-button-brand-text: #fff;
+
+  --vp-custom-block-tip-bg: rgba(6, 182, 212, 0.06);
+  --vp-custom-block-tip-border: #06b6d4;
+  --vp-custom-block-warning-bg: rgba(245, 158, 11, 0.06);
+  --vp-custom-block-warning-border: #f59e0b;
+  --vp-custom-block-danger-bg: rgba(239, 68, 68, 0.06);
+  --vp-custom-block-danger-border: #ef4444;
+  --vp-custom-block-info-bg: rgba(139, 92, 246, 0.06);
+  --vp-custom-block-info-border: #8b5cf6;
+
+  --vp-code-color: #e8ecf2;
+  --vp-code-bg: rgba(0, 0, 0, 0.4);
+  --vp-code-block-bg: #0a0a14;
+  --vp-code-tab-bg: #0f0f1a;
+  --vp-code-tab-active-bg: #161628;
+  --vp-code-line-highlight-color: rgba(139, 92, 246, 0.1);
+
+  --vp-sidebar-bg-color: #080810;
+  --vp-nav-bg-color: rgba(6, 6, 14, 0.85);
+  --vp-local-nav-bg-color: #080810;
+
+  --vp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --vp-shadow-2: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* Gradient accent for headers */
+.vp-doc h1 {
+  background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 800;
+}
+
+.VPNavBarTitle .title {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+}
+
+/* Sidebar */
+.VPSidebarItem.is-link .text {
+  font-size: 0.88rem;
+}
+
+.VPSidebarItem .text {
+  font-size: 0.88rem;
+}
+
+/* Code blocks */
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
+}
+
+.vp-doc code {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent-cyan, #06b6d4);
+}
+
+.vp-doc pre code {
+  color: var(--vp-code-color);
+}
+
+/* Tables */
+.vp-doc table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.vp-doc th {
+  background: rgba(255, 255, 255, 0.03);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  color: var(--vp-c-text-2);
+}
+
+.vp-doc td {
+  border-color: var(--vp-c-border);
+  font-size: 0.85rem;
+}
+
+.vp-doc tr:nth-child(2n) {
+  background: transparent;
+}
+
+/* Custom blocks */
+.vp-doc .custom-block {
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+/* Links */
+.vp-doc a {
+  color: #8b5cf6;
+  text-decoration: none;
+}
+
+.vp-doc a:hover {
+  color: #a78bfa;
+}
+
+/* Navbar */
+.VPNav {
+  border-bottom: 1px solid var(--vp-c-border);
+}
+
+/* Search */
+.VPLocalSearchBox {
+  background: var(--vp-c-bg-alt);
+  border: 1px solid var(--vp-c-border);
+}
+
+/* Footer */
+.VPFooter {
+  border-top: 1px solid var(--vp-c-border);
+}
+
+/* Back to top */
+.VPBackToTop {
+  background: var(--vp-c-bg-alt);
+  border: 1px solid var(--vp-c-border);
+  color: var(--vp-c-text-2);
+}
+
+/* Image styling */
+.vp-doc img {
+  border-radius: 8px;
+  border: 1px solid var(--vp-c-border);
+  margin: 16px 0;
+}
+
+/* Screenshot figure */
+.screenshot {
+  text-align: center;
+  margin: 24px 0;
+}
+.screenshot img {
+  max-width: 100%;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 10px;
+}
+.screenshot figcaption {
+  font-size: 0.78rem;
+  color: var(--vp-c-text-3);
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* Callout for screenshots */
+.screenshot-callout {
+  background: rgba(139, 92, 246, 0.06);
+  border-left: 3px solid #8b5cf6;
+  padding: 12px 16px;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.82rem;
+  color: var(--vp-c-text-2);
+  margin: 16px 0;
+}
