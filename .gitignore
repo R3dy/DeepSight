@@ -9,3 +9,5 @@ node_modules/
 .DS_Store
 *.log
 docs/.vitepress/dist/
+data/syslog.db
+issues/
