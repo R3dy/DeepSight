@@ -29,6 +29,17 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# ── Agent version ──
+AGENT_VERSION = "0.0.0"
+try:
+    _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    if not os.path.exists(_vf):
+        _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "VERSION")
+    if os.path.exists(_vf):
+        with open(_vf) as f:
+            AGENT_VERSION = f.read().strip()
+except Exception:
+    pass
 
 # ═══════════════════════════════════════════
 # Pure-stdlib fallback collectors
@@ -378,6 +389,7 @@ def collect_all():
         "disks": disks,
         "ram_processes": ram_procs,
         "cpu_processes": cpu_procs,
+        "agent_version": AGENT_VERSION,
     }
 
 

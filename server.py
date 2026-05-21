@@ -15,6 +15,15 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 # ── Shared secret for agent auth ──
 SHARED_SECRET = os.environ.get("DASHBOARD_SECRET", "sysdash-agent-key-2026")
 
+# ── Version ──
+SERVER_VERSION = "0.0.0"
+try:
+    _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    with open(_vf) as f:
+        SERVER_VERSION = f.read().strip()
+except Exception:
+    pass
+
 # ── Host storage: {host_id: {last_seen, stats, status}} ──
 HOSTS = {}
 HOSTS_LOCK = threading.Lock()
@@ -1133,6 +1142,34 @@ def add_host_page():
     return send_from_directory("static", "add-host.html")
 
 
+@app.route("/api/version")
+def api_version():
+    """Return server version and git metadata."""
+    git_sha = ""
+    git_ref = ""
+    try:
+        import subprocess
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        git_ref = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        pass
+    return jsonify({
+        "version": SERVER_VERSION,
+        "git_sha": git_sha,
+        "git_ref": git_ref,
+        "release_url": f"https://github.com/R3dy/DeepSight/releases/tag/v{SERVER_VERSION}" if SERVER_VERSION != "0.0.0" else "",
+        "repo_url": "https://github.com/R3dy/DeepSight",
+    })
+
+
 @app.route("/api/stats")
 def api_stats():
     host = request.args.get("host", SELF_HOST)
@@ -1216,6 +1253,7 @@ def api_hosts():
             hosts[h] = {
                 "last_seen": entry["last_seen"],
                 "status": status,
+                "version": entry["stats"].get("agent_version", "") if h != SELF_HOST else SERVER_VERSION,
             }
 
     return jsonify({"hosts": hosts, "current": SELF_HOST})
