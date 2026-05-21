@@ -210,15 +210,11 @@ def fetch_urlhaus():
     entries = []
     for item in data.get("urls", []):
         url_str = item.get("url", "")
-        try:
-            host = item.get("host", "")
-            ip = socket.gethostbyname(host) if host else ""
-        except Exception:
-            ip = ""
+        # URLhaus already provides the host — no DNS resolution needed
         entries.append({
             "url": url_str,
-            "host": host,
-            "ip": ip,
+            "host": item.get("host", ""),
+            "ip": "",  # URLhaus tracks hosts, not IPs — matched by hostname
             "threat": item.get("threat", ""),
             "malware_family": item.get("urlhaus_references", [{}])[0].get("malware", "") if item.get("urlhaus_references") else "",
             "date_added": item.get("date_added", ""),
@@ -361,7 +357,9 @@ _create_alert = None
 def _check_ip_against_intel(ip, ip_meta, source_name, intel_data):
     """
     Check a single observed IP against a source's intel data.
-    Returns alert dicts for matches.
+    Uses pre-indexed dict for O(1) lookup instead of O(n) scan.
+    intel_data should be a dict {ip: [entries]} from _index_intel_by_ip().
+    Falls back to list iteration if given unindexed legacy data.
     """
     global _create_alert
     if _create_alert is None:
@@ -371,10 +369,15 @@ def _check_ip_against_intel(ip, ip_meta, source_name, intel_data):
         except ImportError:
             return []
 
+    # O(1) indexed lookup
+    if isinstance(intel_data, dict):
+        matches = intel_data.get(ip, [])
+    else:
+        # Legacy fallback: O(n) scan
+        matches = [e for e in intel_data if e.get("ip") == ip]
+
     alerts = []
-    for entry in intel_data:
-        if entry.get("ip") != ip:
-            continue
+    for entry in matches:
 
         severity = THREAT_SEVERITY.get(source_name, "medium")
         title = f"Threat intel match: {ip} flagged by {source_name}"
@@ -408,6 +411,7 @@ def _check_ip_against_intel(ip, ip_meta, source_name, intel_data):
             category="threat_intel",
             title=title,
             description="\n".join(desc_parts),
+            source_host=ip_meta.get("host", ""),
             source_ip=ip,
             mitre_tactic="Command and Control",
             mitre_technique="T1071 (Application Layer Protocol)",
@@ -423,6 +427,19 @@ def _check_ip_against_intel(ip, ip_meta, source_name, intel_data):
     return alerts
 
 
+def _index_intel_by_ip(entries):
+    """Index intel entries by IP for O(1) lookup instead of O(n) scan."""
+    idx = {}
+    for entry in entries:
+        ip = entry.get("ip", "")
+        if not ip:
+            continue
+        if ip not in idx:
+            idx[ip] = []
+        idx[ip].append(entry)
+    return idx
+
+
 def cross_reference():
     """
     Cross-reference all observed IPs against current threat intel caches.
@@ -433,13 +450,9 @@ def cross_reference():
     if not observed:
         return []
 
-    sources = {
-        "abuseipdb": _cache_get("abuseipdb") or [],
-        "otx": _cache_get("otx") or [],
-        "urlhaus": _cache_get("urlhaus") or [],
-        "feodo": _cache_get("feodo") or [],
-        "tor": _cache_get("tor") or [],
-    }
+    # Build indexed dictionaries for O(1) lookups
+    sources = {name: _index_intel_by_ip(_cache_get(name) or [])
+               for name in ["abuseipdb", "otx", "urlhaus", "feodo", "tor"]}
 
     for ip, meta in observed.items():
         for source_name, intel_data in sources.items():
