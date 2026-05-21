@@ -1573,6 +1573,33 @@ def api_alert_stats():
     return jsonify(detection.get_alert_stats(hours=hours))
 
 
+@app.route("/api/syslog-events")
+def api_syslog_events():
+    """Return recent syslog events with optional host/facility filters."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    host = request.args.get("host")
+    facility = request.args.get("facility")
+    limit = request.args.get("limit", 100, type=int)
+    events = detection.get_syslog_events(host=host, facility=facility, limit=limit)
+    hosts = detection.get_syslog_hosts()
+    facilities = detection.get_syslog_facilities()
+    return jsonify({
+        "events": events,
+        "count": len(events),
+        "hosts": hosts,
+        "facilities": facilities,
+    })
+
+
+@app.route("/api/syslog-hosts")
+def api_syslog_hosts():
+    """Return distinct syslog hosts."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    return jsonify({"hosts": detection.get_syslog_hosts()})
+
+
 # ── Start detection collectors in background ──
 _starup_detection_done = False
 _starup_detection_lock = threading.Lock()
