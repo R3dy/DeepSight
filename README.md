@@ -2,6 +2,10 @@
 
 > Real-time system monitoring, process forensics, and SIEM-level threat detection — across every Linux host in your fleet.
 
+<p align="center">
+  <a href="https://discord.gg/uzWJKDMRY"><img src="https://img.shields.io/badge/Discord-Join%20the%20discussion-5865F2?logo=discord&logoColor=white&style=for-the-badge" alt="Discord" /></a>
+</p>
+
 DeepSight is a lightweight, self-hosted dashboard that gives you observability into your servers. Monitor RAM, CPU, GPU, disk, and network usage in real time. Drill into individual processes with forensic detail. Track logged-in users and outbound HTTP connections. Detect reverse shells, C2 beaconing, brute force attacks, and file tampering — all from a single dark-mode dashboard.
 
 <p align="center">
