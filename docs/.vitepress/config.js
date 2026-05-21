@@ -1,15 +1,17 @@
 import { defineConfig } from 'vitepress'
 
+const isVercel = !!process.env.VERCEL;
+
 export default defineConfig({
   title: 'DeepSight',
   description: 'Real-time system monitoring & security dashboard',
-  base: '/docs/',
-  outDir: '../static/docs',
+  base: isVercel ? '/' : '/docs/',
+  outDir: isVercel ? '.vitepress/dist' : '../static/docs',
   
   themeConfig: {
     nav: [
       { text: 'Dashboard', link: 'https://open-claw01.tail9058f7.ts.net:8451/' },
-      { text: 'GitHub', link: 'https://github.com/R3dy/myclaw' },
+      { text: 'GitHub', link: 'https://github.com/R3dy/DeepSight' },
     ],
     sidebar: [
       {
@@ -39,7 +41,7 @@ export default defineConfig({
       },
     ],
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/R3dy/myclaw' },
+      { icon: 'github', link: 'https://github.com/R3dy/DeepSight' },
     ],
     search: {
       provider: 'local',
