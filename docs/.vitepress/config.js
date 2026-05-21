@@ -7,7 +7,18 @@ export default defineConfig({
   description: 'Real-time system monitoring & security dashboard',
   base: isVercel ? '/' : '/docs/',
   outDir: isVercel ? '.vitepress/dist' : '../static/docs',
-  
+
+  head: [
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:title', content: 'DeepSight — System Monitoring & SIEM Dashboard' }],
+    ['meta', { property: 'og:description', content: 'Real-time system monitoring, process forensics, and SIEM-level threat detection — across every Linux host in your fleet.' }],
+    ['meta', { property: 'og:image', content: '/social-preview.png' }],
+    ['meta', { property: 'og:image:width', content: '1280' }],
+    ['meta', { property: 'og:image:height', content: '640' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:image', content: '/social-preview.png' }],
+  ],
+
   themeConfig: {
     nav: [
       { text: 'Dashboard', link: 'https://open-claw01.tail9058f7.ts.net:8451/' },
