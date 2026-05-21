@@ -1046,7 +1046,7 @@
   <div class="login-card">
     <h2>⚡ DeepSight</h2>
     <div class="login-subtitle">Sign in to access the dashboard</div>
-    <form id="login-form" onsubmit="return doLogin()">
+    <form id="login-form" onsubmit="doLogin(); return false">
       <label for="login-username">Username</label>
       <input type="text" id="login-username" placeholder="admin" autocomplete="username" required>
       <label for="login-password">Password</label>
