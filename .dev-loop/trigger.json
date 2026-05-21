@@ -1,7 +1,0 @@
-{
-  "feature": "threat-intel",
-  "title": "Threat intelligence feed integration",
-  "description": "AbuseIPDB, AlienVault OTX, URLhaus, Feodo, Tor exit nodes",
-  "phase": 1,
-  "timestamp": 1779385624.398952
-}
