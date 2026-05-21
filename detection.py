@@ -19,6 +19,13 @@ import subprocess
 from collections import defaultdict
 from datetime import datetime, timezone
 
+# ── Optional notifier integration ──
+try:
+    from notifier import dispatch_alert as _dispatch_notification
+except ImportError:
+    def _dispatch_notification(alert):
+        pass  # notifier.py not available
+
 # ── Optional imports ──
 try:
     import psutil
@@ -327,7 +334,7 @@ def create_alert(severity, category, title, description="", source_host="",
         conn.commit()
         alert_id = cur.lastrowid
         _log(f"⚠ ALERT [{severity.upper()}] {title} (id={alert_id})")
-        return {
+        alert_dict = {
             "id": alert_id, "timestamp": now_ts, "severity": severity,
             "category": category, "title": title, "description": description,
             "source_host": source_host, "source_ip": source_ip,
@@ -335,6 +342,9 @@ def create_alert(severity, category, title, description="", source_host="",
             "process_pid": process_pid, "process_name": process_name,
             "raw_data": raw_data, "acknowledged": False,
         }
+        # Dispatch notification (non-blocking background thread)
+        _dispatch_notification(alert_dict)
+        return alert_dict
     except Exception as e:
         _log(f"Error creating alert: {e}")
         return None

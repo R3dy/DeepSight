@@ -1,0 +1,50 @@
+# DeepSight Notification Config — Example
+# Copy to: ~/.config/deepsight/notifications.toml (or set NOTIFIER_CONFIG env var)
+#
+# DeepSight uses apprise under the hood — any apprise-compatible URL works.
+# Full list of supported services: https://github.com/caronc/apprise
+
+# ── Channel Definitions ──
+# Define your notification endpoints here. Each one gets a name you can
+# reference in the [routing] section below.
+
+[discord]
+# Get this from: Discord → Server Settings → Integrations → Webhooks → New Webhook
+webhook_url = "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+
+[slack]
+# Get this from: Slack → Apps → Incoming Webhooks → Add to Workspace
+webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+
+# [telegram]
+# Get this from: @BotFather on Telegram → create bot → get token
+# webhook_url = "tgram://BOT_TOKEN/CHAT_ID"
+
+# [pushover]
+# Get this from: pushover.net → register application
+# webhook_url = "pover://USER_KEY@APP_TOKEN"
+
+# [ntfy]
+# Self-hosted or ntfy.sh — great for mobile push
+# webhook_url = "ntfy://ntfy.sh/YOUR_TOPIC"
+
+# [email]
+# webhook_url = "mailto://user:pass@gmail.com"
+
+# ── Routing Rules ──
+# Map alert severity → which channels to notify.
+# Leave empty list [] to suppress that severity level.
+
+[routing]
+critical = ["discord", "slack"]
+high = ["discord"]
+medium = []
+low = []
+
+# ── Quiet Hours (optional) ──
+# Suppress ALL notifications during this window.
+# Times are in 24h format, local timezone.
+
+[quiet_hours]
+start = "22:00"
+end = "07:00"
