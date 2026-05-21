@@ -10,4 +10,3 @@ node_modules/
 *.log
 docs/.vitepress/dist/
 data/syslog.db
-issues/
