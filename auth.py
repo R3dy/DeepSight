@@ -676,6 +676,13 @@ def require_auth(f):
         # ── Backward compatibility escape hatch ──
         if INSECURE_NO_AUTH:
             print("[auth] WARNING: DEEPSIGHT_INSECURE_NO_AUTH is set — all auth bypassed!", flush=True)
+            g.current_user = {
+                "user_id": 0,
+                "username": "insecure-mode",
+                "is_admin": True,
+                "scope": "full",
+                "token_type": "insecure",
+            }
             return f(*args, **kwargs)
 
         token = _extract_bearer_token()
@@ -698,6 +705,13 @@ def require_agent_auth(f):
         # ── Backward compatibility fallback ──
         if INSECURE_NO_AUTH:
             print("[auth] WARNING: DEEPSIGHT_INSECURE_NO_AUTH is set — all auth bypassed!", flush=True)
+            g.current_user = {
+                "user_id": 0,
+                "username": "insecure-mode",
+                "is_admin": True,
+                "scope": "full",
+                "token_type": "insecure",
+            }
             return f(*args, **kwargs)
 
         # Check POST body first (for /api/report)
