@@ -2627,6 +2627,176 @@ def acknowledge_alert(alert_id):
         return False
 
 
+def get_dashboard_data(hours=24):
+    """Return aggregated data for security dashboard Chart.js panels.
+
+    Returns 6 data sets:
+      - alert_timeline: hourly alert counts by severity for line chart
+      - top_source_ips: most frequent source IPs for horizontal bar chart
+      - mitre_tactics: MITRE ATT&CK tactic counts for radar chart
+      - alert_severity: severity distribution for doughnut chart
+      - event_type_distribution: breakdown by event type for bar chart
+      - agent_health: placeholder — filled by server.py from HOSTS
+    """
+    try:
+        conn = get_db()
+
+        # ── Alert Timeline (hourly buckets, last N hours) ──
+        timeline_rows = conn.execute("""
+            SELECT
+                strftime('%H', timestamp) as hour_bucket,
+                strftime('%Y-%m-%d %H', timestamp) as hour_label,
+                severity,
+                COUNT(*) as count
+            FROM alerts
+            WHERE timestamp >= datetime('now', ?)
+            GROUP BY hour_label, severity
+            ORDER BY hour_label ASC
+        """, (f"-{hours} hours",)).fetchall()
+
+        # Build timeline: {hour_label: {severity: count}}
+        timeline = {}
+        for r in timeline_rows:
+            label = r["hour_label"]
+            if label not in timeline:
+                timeline[label] = {}
+            timeline[label][r["severity"]] = r["count"]
+
+        alert_timeline = {
+            "labels": sorted(timeline.keys()),
+            "critical": [timeline.get(h, {}).get("critical", 0) for h in sorted(timeline.keys())],
+            "high": [timeline.get(h, {}).get("high", 0) for h in sorted(timeline.keys())],
+            "medium": [timeline.get(h, {}).get("medium", 0) for h in sorted(timeline.keys())],
+            "low": [timeline.get(h, {}).get("low", 0) for h in sorted(timeline.keys())],
+            "info": [timeline.get(h, {}).get("info", 0) for h in sorted(timeline.keys())],
+        }
+
+        # ── Top Source IPs (across auth_events and alerts) ──
+        # From auth_events
+        auth_ips = conn.execute("""
+            SELECT source_ip, COUNT(*) as count
+            FROM auth_events
+            WHERE timestamp >= datetime('now', ?) AND source_ip IS NOT NULL AND source_ip != ''
+            GROUP BY source_ip
+        """, (f"-{hours} hours",)).fetchall()
+
+        # From alerts
+        alert_ips = conn.execute("""
+            SELECT source_ip, COUNT(*) as count
+            FROM alerts
+            WHERE timestamp >= datetime('now', ?) AND source_ip IS NOT NULL AND source_ip != ''
+            GROUP BY source_ip
+        """, (f"-{hours} hours",)).fetchall()
+
+        # Merge IP counts
+        ip_counts = {}
+        for r in auth_ips:
+            ip = r["source_ip"]
+            ip_counts[ip] = ip_counts.get(ip, 0) + r["count"]
+        for r in alert_ips:
+            ip = r["source_ip"]
+            ip_counts[ip] = ip_counts.get(ip, 0) + r["count"]
+
+        top_ips = sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_source_ips = {
+            "labels": [ip for ip, _ in top_ips],
+            "counts": [count for _, count in top_ips],
+        }
+
+        # ── MITRE ATT&CK Tactic Distribution ──
+        mitre_rows = conn.execute("""
+            SELECT mitre_tactic, COUNT(*) as count
+            FROM alerts
+            WHERE timestamp >= datetime('now', ?)
+              AND mitre_tactic IS NOT NULL AND mitre_tactic != ''
+            GROUP BY mitre_tactic
+            ORDER BY count DESC
+        """, (f"-{hours} hours",)).fetchall()
+
+        mitre_tactics = {
+            "labels": [r["mitre_tactic"] for r in mitre_rows],
+            "counts": [r["count"] for r in mitre_rows],
+        }
+
+        # ── Alert Severity Distribution ──
+        sev_rows = conn.execute("""
+            SELECT severity, COUNT(*) as count
+            FROM alerts
+            WHERE timestamp >= datetime('now', ?)
+            GROUP BY severity
+        """, (f"-{hours} hours",)).fetchall()
+
+        alert_severity = {
+            "labels": [r["severity"] for r in sev_rows],
+            "counts": [r["count"] for r in sev_rows],
+        }
+
+        # ── Event Type Distribution ──
+        event_counts = {}
+
+        # Alert types by category
+        cat_rows = conn.execute("""
+            SELECT category, COUNT(*) as count
+            FROM alerts
+            WHERE timestamp >= datetime('now', ?)
+            GROUP BY category
+        """, (f"-{hours} hours",)).fetchall()
+        for r in cat_rows:
+            event_counts[f"Alert: {r['category'] or 'uncategorized'}"] = r["count"]
+
+        # Auth event counts
+        auth_total = conn.execute("""
+            SELECT COUNT(*) as count FROM auth_events
+            WHERE timestamp >= datetime('now', ?)
+        """, (f"-{hours} hours",)).fetchone()["count"]
+        if auth_total > 0:
+            event_counts["Auth Events"] = auth_total
+
+        # File event counts
+        file_total = conn.execute("""
+            SELECT COUNT(*) as count FROM file_events
+            WHERE timestamp >= datetime('now', ?)
+        """, (f"-{hours} hours",)).fetchone()["count"]
+        if file_total > 0:
+            event_counts["File Events"] = file_total
+
+        # Beaconing count
+        beacon_total = conn.execute("""
+            SELECT COUNT(*) as count FROM beaconing_events
+            WHERE timestamp >= datetime('now', ?)
+        """, (f"-{hours} hours",)).fetchone()["count"]
+        if beacon_total > 0:
+            event_counts["Beaconing"] = beacon_total
+
+        event_type_distribution = {
+            "labels": list(event_counts.keys()),
+            "counts": list(event_counts.values()),
+        }
+
+        return {
+            "alert_timeline": alert_timeline,
+            "top_source_ips": top_source_ips,
+            "mitre_tactics": mitre_tactics,
+            "alert_severity": alert_severity,
+            "event_type_distribution": event_type_distribution,
+            "agent_health": None,  # filled by server.py
+            "hours": hours,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    except Exception as e:
+        _log(f"get_dashboard_data error: {e}")
+        return {
+            "alert_timeline": {"labels": [], "critical": [], "high": [], "medium": [], "low": [], "info": []},
+            "top_source_ips": {"labels": [], "counts": []},
+            "mitre_tactics": {"labels": [], "counts": []},
+            "alert_severity": {"labels": [], "counts": []},
+            "event_type_distribution": {"labels": [], "counts": []},
+            "agent_health": None,
+            "hours": hours,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+
 def get_alert_stats(hours=24):
     """Return alert counts grouped by severity and category."""
     try:

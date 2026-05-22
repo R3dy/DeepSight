@@ -801,6 +801,21 @@
   .security-view.hidden { display: none; }
   .sec-dashboard { display: flex; flex-direction: column; gap: 16px; }
 
+  /* ── Security Dashboard Charts ── */
+  .sec-charts-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .sec-charts-grid .card { min-width: 0; }
+  .sec-chart-wrap {
+    position: relative; width: 100%;
+  }
+  .sec-chart-wrap.timeline { height: 240px; }
+  .sec-chart-wrap.hbar { height: 220px; }
+  .sec-chart-wrap.radar { height: 260px; display: flex; justify-content: center; }
+  .sec-chart-wrap.doughnut { height: 220px; display: flex; justify-content: center; }
+  .sec-chart-wrap.bar { height: 200px; }
+  .sec-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
   /* Severity summary cards */
   .sec-summary-row {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
@@ -1645,6 +1660,60 @@
       </div>
     </div>
 
+    <!-- ═══ Chart Panels: Alert Timeline (full width) ═══ -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">📈 Alert Timeline</span>
+        <span class="card-badge" id="sec-timeline-badge">24h</span>
+      </div>
+      <div class="sec-chart-wrap timeline"><canvas id="chart-alert-timeline"></canvas></div>
+    </div>
+
+    <!-- ═══ Row: Top Source IPs + MITRE Radar ═══ -->
+    <div class="sec-charts-grid">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🌐 Top Source IPs</span>
+          <span class="card-badge" id="sec-ips-badge">24h</span>
+        </div>
+        <div class="sec-chart-wrap hbar"><canvas id="chart-top-ips"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🎯 MITRE ATT&CK Tactics</span>
+          <span class="card-badge" id="sec-mitre-badge">24h</span>
+        </div>
+        <div class="sec-chart-wrap radar"><canvas id="chart-mitre-radar"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══ Row: Alert Severity + Agent Health ═══ -->
+    <div class="sec-charts-grid">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">⚠️ Alert Severity</span>
+          <span class="card-badge" id="sec-severity-badge">24h</span>
+        </div>
+        <div class="sec-chart-wrap doughnut"><canvas id="chart-alert-severity"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🖥️ Agent Health</span>
+          <span class="card-badge" id="sec-agents-badge">0 hosts</span>
+        </div>
+        <div class="sec-chart-wrap doughnut"><canvas id="chart-agent-health"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══ Event Type Distribution (full width) ═══ -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">📊 Event Type Distribution</span>
+        <span class="card-badge" id="sec-events-badge">24h</span>
+      </div>
+      <div class="sec-chart-wrap bar"><canvas id="chart-event-types"></canvas></div>
+    </div>
+
   </div>
   </div><!-- /security-view -->
 
@@ -2469,6 +2538,10 @@ function switchView(view) {
     fetchOverview();
   } else if (view === 'security') {
     startSecurityPolling();
+    // Lazy-init charts on first security tab visit
+    if (!chartAlertTimeline) {
+      setTimeout(() => { initSecurityCharts(); fetchSecurityDashboards(); }, 100);
+    }
   } else {
     fetchStats();
   }
@@ -2480,6 +2553,13 @@ function switchView(view) {
 
 let clusterRamChart = null;
 let clusterCpuChart = null;
+// Security dashboard charts
+let chartAlertTimeline = null;
+let chartTopIps = null;
+let chartMitreRadar = null;
+let chartAlertSeverity = null;
+let chartAgentHealth = null;
+let chartEventTypes = null;
 
 function initClusterCharts() {
   const ramCtx = document.getElementById('clusterRamChart');
@@ -3592,6 +3672,201 @@ function startSecurityPolling() {
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSyslogEvents(); }, 10000));
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchThreatIntel(); }, 30000));
   fetchThreatIntel();
+  // Security dashboards — initialized lazily on first tab switch
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSecurityDashboards(); }, 30000));
+}
+
+// ═══════════════════════════════════════════
+// Security Dashboard Charts (6 panels)
+// ═══════════════════════════════════════════
+
+const SEV_COLORS = {
+  critical: '#ef4444', high: '#f97316', medium: '#f59e0b', low: '#06b6d4', info: '#8892a8'
+};
+const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
+
+function initSecurityCharts() {
+  // ── Alert Timeline ──
+  const tlCtx = document.getElementById('chart-alert-timeline').getContext('2d');
+  chartAlertTimeline = new Chart(tlCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 9 }, maxTicksLimit: 12 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 9 }, precision: 0 } }
+      },
+      plugins: { legend: { position: 'top', align: 'end', labels: { color: '#8892a8', font: { size: 10 }, boxWidth: 10, padding: 10, usePointStyle: true } } },
+      animation: { duration: 400 },
+    }
+  });
+
+  // ── Top Source IPs ──
+  const ipsCtx = document.getElementById('chart-top-ips').getContext('2d');
+  chartTopIps = new Chart(ipsCtx, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Events', data: [], backgroundColor: '#8b5cf6', borderRadius: 4, borderSkipped: false }] },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 9 }, precision: 0 } },
+        y: { grid: { display: false }, ticks: { color: '#8892a8', font: { family: 'JetBrains Mono', size: 9 } } }
+      },
+      plugins: { legend: { display: false } },
+      animation: { duration: 400 },
+    }
+  });
+
+  // ── MITRE ATT&CK Radar ──
+  const mitreCtx = document.getElementById('chart-mitre-radar').getContext('2d');
+  chartMitreRadar = new Chart(mitreCtx, {
+    type: 'radar',
+    data: { labels: [], datasets: [{ label: 'Alerts', data: [], backgroundColor: 'rgba(139,92,246,0.2)', borderColor: '#8b5cf6', borderWidth: 2, pointBackgroundColor: '#8b5cf6', pointRadius: 3 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        r: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          angleLines: { color: 'rgba(255,255,255,0.06)' },
+          pointLabels: { color: '#8892a8', font: { size: 9 } },
+          ticks: { display: true, backdropColor: 'transparent', color: '#5a6378', font: { size: 8 }, precision: 0 }
+        }
+      },
+      plugins: { legend: { display: false } },
+      animation: { duration: 400 },
+    }
+  });
+
+  // ── Alert Severity Doughnut ──
+  const sevCtx = document.getElementById('chart-alert-severity').getContext('2d');
+  chartAlertSeverity = new Chart(sevCtx, {
+    type: 'doughnut',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: 'rgba(6,6,14,0.8)', borderWidth: 2 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: { legend: { position: 'bottom', labels: { color: '#8892a8', font: { size: 9 }, boxWidth: 8, padding: 10, usePointStyle: true } } },
+      animation: { duration: 400 },
+    }
+  });
+
+  // ── Agent Health Doughnut ──
+  const ahCtx = document.getElementById('chart-agent-health').getContext('2d');
+  chartAgentHealth = new Chart(ahCtx, {
+    type: 'doughnut',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#5a6378'], borderColor: 'rgba(6,6,14,0.8)', borderWidth: 2 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: { legend: { position: 'bottom', labels: { color: '#8892a8', font: { size: 9 }, boxWidth: 8, padding: 10, usePointStyle: true } } },
+      animation: { duration: 400 },
+    }
+  });
+
+  // ── Event Type Distribution ──
+  const etCtx = document.getElementById('chart-event-types').getContext('2d');
+  chartEventTypes = new Chart(etCtx, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Events', data: [], backgroundColor: [], borderRadius: 6, borderSkipped: false }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 8 }, maxRotation: 45 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 9 }, precision: 0 } }
+      },
+      plugins: { legend: { display: false } },
+      animation: { duration: 400 },
+    }
+  });
+}
+
+async function fetchSecurityDashboards() {
+  try {
+    const res = await fetch('/api/security-dashboards');
+    const data = await res.json();
+    renderSecurityDashboards(data);
+  } catch (e) {
+    console.error('security dashboards fetch error:', e);
+  }
+}
+
+function renderSecurityDashboards(data) {
+  // ── 1. Alert Timeline ──
+  if (chartAlertTimeline) {
+    const tl = data.alert_timeline || {};
+    chartAlertTimeline.data.labels = tl.labels || [];
+    chartAlertTimeline.data.datasets = SEV_ORDER
+      .filter(s => (tl[s] || []).some(v => v > 0))
+      .map(s => ({
+        label: s.charAt(0).toUpperCase() + s.slice(1),
+        data: tl[s] || [],
+        borderColor: SEV_COLORS[s],
+        backgroundColor: SEV_COLORS[s] + '20',
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+      }));
+    chartAlertTimeline.update('none');
+    const totalAlerts = SEV_ORDER.reduce((sum, s) => sum + (tl[s] || []).reduce((a, b) => a + b, 0), 0);
+    document.getElementById('sec-timeline-badge').textContent = totalAlerts + ' alerts';
+  }
+
+  // ── 2. Top Source IPs ──
+  if (chartTopIps) {
+    const ips = data.top_source_ips || {};
+    chartTopIps.data.labels = ips.labels || [];
+    chartTopIps.data.datasets[0].data = ips.counts || [];
+    chartTopIps.update('none');
+    document.getElementById('sec-ips-badge').textContent = (ips.labels || []).length + ' IPs';
+  }
+
+  // ── 3. MITRE ATT&CK Radar ──
+  if (chartMitreRadar) {
+    const mitre = data.mitre_tactics || {};
+    chartMitreRadar.data.labels = mitre.labels || [];
+    chartMitreRadar.data.datasets[0].data = mitre.counts || [];
+    chartMitreRadar.update('none');
+    document.getElementById('sec-mitre-badge').textContent = (mitre.labels || []).length + ' tactics';
+  }
+
+  // ── 4. Alert Severity Distribution ──
+  if (chartAlertSeverity) {
+    const sev = data.alert_severity || {};
+    const labels = sev.labels || [];
+    const counts = sev.counts || [];
+    chartAlertSeverity.data.labels = labels.map(l => l.charAt(0).toUpperCase() + l.slice(1));
+    chartAlertSeverity.data.datasets[0].data = counts;
+    chartAlertSeverity.data.datasets[0].backgroundColor = labels.map(l => SEV_COLORS[l] || '#5a6378');
+    chartAlertSeverity.update('none');
+    document.getElementById('sec-severity-badge').textContent = counts.reduce((a, b) => a + b, 0) + ' total';
+  }
+
+  // ── 5. Agent Health ──
+  if (chartAgentHealth) {
+    const ah = data.agent_health || {};
+    chartAgentHealth.data.labels = ah.labels || [];
+    chartAgentHealth.data.datasets[0].data = ah.counts || [];
+    chartAgentHealth.update('none');
+    document.getElementById('sec-agents-badge').textContent = (ah.total_hosts || 0) + ' hosts';
+  }
+
+  // ── 6. Event Type Distribution ──
+  if (chartEventTypes) {
+    const et = data.event_type_distribution || {};
+    const etLabels = et.labels || [];
+    const etCounts = et.counts || [];
+    chartEventTypes.data.labels = etLabels;
+    chartEventTypes.data.datasets[0].data = etCounts;
+    const palette = ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#f97316', '#ef4444', '#ec4899', '#8892a8'];
+    chartEventTypes.data.datasets[0].backgroundColor = etLabels.map((_, i) => palette[i % palette.length]);
+    chartEventTypes.update('none');
+    document.getElementById('sec-events-badge').textContent = etCounts.reduce((a, b) => a + b, 0) + ' events';
+  }
 }
 
 function stopSecurityPolling() {
