@@ -246,6 +246,9 @@ def _create_tables(conn):
             domain, content='dns_events', content_rowid='id'
         );
     """)
+    # ── FTS5 sync triggers — keep indexes in sync with source tables ──
+    _create_fts_triggers(conn)
+
     # ── Schema migrations for new columns ──
     _migrate_beaconing_schema(conn)
     conn.commit()
@@ -265,6 +268,127 @@ def _migrate_beaconing_schema(conn):
     for col_name, col_def in new_cols:
         if col_name not in existing:
             conn.execute(f"ALTER TABLE beaconing_events ADD COLUMN {col_name} {col_def}")
+
+
+def _create_fts_triggers(conn):
+    """Create INSERT/UPDATE/DELETE triggers so FTS5 indexes stay in sync."""
+    # alerts_fts (columns: title, description)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS alerts_fts_ai AFTER INSERT ON alerts BEGIN
+            INSERT INTO alerts_fts(rowid, title, description)
+            VALUES (new.id, new.title, new.description);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS alerts_fts_ad AFTER DELETE ON alerts BEGIN
+            INSERT INTO alerts_fts(alerts_fts, rowid, title, description)
+            VALUES ('delete', old.id, old.title, old.description);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS alerts_fts_au AFTER UPDATE ON alerts BEGIN
+            INSERT INTO alerts_fts(alerts_fts, rowid, title, description)
+            VALUES ('delete', old.id, old.title, old.description);
+            INSERT INTO alerts_fts(rowid, title, description)
+            VALUES (new.id, new.title, new.description);
+        END
+    """)
+
+    # auth_events_fts (columns: username, source_ip, details)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS auth_events_fts_ai AFTER INSERT ON auth_events BEGIN
+            INSERT INTO auth_events_fts(rowid, username, source_ip, details)
+            VALUES (new.id, new.username, new.source_ip, new.details);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS auth_events_fts_ad AFTER DELETE ON auth_events BEGIN
+            INSERT INTO auth_events_fts(auth_events_fts, rowid, username, source_ip, details)
+            VALUES ('delete', old.id, old.username, old.source_ip, old.details);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS auth_events_fts_au AFTER UPDATE ON auth_events BEGIN
+            INSERT INTO auth_events_fts(auth_events_fts, rowid, username, source_ip, details)
+            VALUES ('delete', old.id, old.username, old.source_ip, old.details);
+            INSERT INTO auth_events_fts(rowid, username, source_ip, details)
+            VALUES (new.id, new.username, new.source_ip, new.details);
+        END
+    """)
+
+    # file_events_fts (columns: path)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS file_events_fts_ai AFTER INSERT ON file_events BEGIN
+            INSERT INTO file_events_fts(rowid, path)
+            VALUES (new.id, new.path);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS file_events_fts_ad AFTER DELETE ON file_events BEGIN
+            INSERT INTO file_events_fts(file_events_fts, rowid, path)
+            VALUES ('delete', old.id, old.path);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS file_events_fts_au AFTER UPDATE ON file_events BEGIN
+            INSERT INTO file_events_fts(file_events_fts, rowid, path)
+            VALUES ('delete', old.id, old.path);
+            INSERT INTO file_events_fts(rowid, path)
+            VALUES (new.id, new.path);
+        END
+    """)
+
+    # beaconing_fts (columns: process_name, remote_ip, remote_host, http_path, tls_sni, user_agent)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS beaconing_fts_ai AFTER INSERT ON beaconing_events BEGIN
+            INSERT INTO beaconing_fts(rowid, process_name, remote_ip, remote_host,
+                                     http_path, tls_sni, user_agent)
+            VALUES (new.id, new.process_name, new.remote_ip, new.remote_host,
+                    new.http_path, new.tls_sni, new.user_agent);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS beaconing_fts_ad AFTER DELETE ON beaconing_events BEGIN
+            INSERT INTO beaconing_fts(beaconing_fts, rowid, process_name, remote_ip,
+                                     remote_host, http_path, tls_sni, user_agent)
+            VALUES ('delete', old.id, old.process_name, old.remote_ip, old.remote_host,
+                    old.http_path, old.tls_sni, old.user_agent);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS beaconing_fts_au AFTER UPDATE ON beaconing_events BEGIN
+            INSERT INTO beaconing_fts(beaconing_fts, rowid, process_name, remote_ip,
+                                     remote_host, http_path, tls_sni, user_agent)
+            VALUES ('delete', old.id, old.process_name, old.remote_ip, old.remote_host,
+                    old.http_path, old.tls_sni, old.user_agent);
+            INSERT INTO beaconing_fts(rowid, process_name, remote_ip, remote_host,
+                                     http_path, tls_sni, user_agent)
+            VALUES (new.id, new.process_name, new.remote_ip, new.remote_host,
+                    new.http_path, new.tls_sni, new.user_agent);
+        END
+    """)
+
+    # dns_events_fts (columns: domain)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS dns_events_fts_ai AFTER INSERT ON dns_events BEGIN
+            INSERT INTO dns_events_fts(rowid, domain)
+            VALUES (new.id, new.domain);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS dns_events_fts_ad AFTER DELETE ON dns_events BEGIN
+            INSERT INTO dns_events_fts(dns_events_fts, rowid, domain)
+            VALUES ('delete', old.id, old.domain);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS dns_events_fts_au AFTER UPDATE ON dns_events BEGIN
+            INSERT INTO dns_events_fts(dns_events_fts, rowid, domain)
+            VALUES ('delete', old.id, old.domain);
+            INSERT INTO dns_events_fts(rowid, domain)
+            VALUES (new.id, new.domain);
+        END
+    """)
 
 
 def rebuild_fts_indexes():
@@ -714,6 +838,8 @@ def _fts_sanitize(text):
     # Remove them to avoid syntax errors; keep alphanumeric, spaces, and basic punctuation
     import re as _re
     cleaned = _re.sub(r'[()\\[\\]{}~@#$%^&+=|\\\\<>]', '', text)
+    # Strip leading hyphens (FTS5 NOT operator) to avoid zero-result queries
+    cleaned = cleaned.lstrip('-')
     # Escape double quotes
     cleaned = cleaned.replace('"', '""')
     # If text has multiple words, wrap in quotes for phrase matching
