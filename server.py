@@ -1613,6 +1613,32 @@ def api_alert_stats():
     return jsonify(detection.get_alert_stats(hours=hours))
 
 
+@app.route("/api/security-dashboards")
+@auth.require_auth
+def api_security_dashboards():
+    """Return aggregated data for 6 Chart.js security dashboard panels."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    hours = request.args.get("hours", 24, type=int)
+    data = detection.get_dashboard_data(hours=hours)
+
+    # ── Agent Health (from HOSTS data) ──
+    with HOSTS_LOCK:
+        hosts = dict(HOSTS)
+    online = sum(1 for h in hosts.values() if h.get("status") == "online")
+    stale = sum(1 for h in hosts.values() if h.get("status") == "stale")
+    offline = sum(1 for h in hosts.values() if h.get("status") == "offline")
+    unknown = max(0, len(hosts) - online - stale - offline)
+    data["agent_health"] = {
+        "labels": ["Online", "Stale", "Offline", "Unknown"],
+        "counts": [online, stale, offline, unknown],
+        "total_hosts": len(hosts),
+        "host_names": [h for h in hosts.keys()],
+    }
+
+    return jsonify(data)
+
+
 @app.route("/api/syslog-events")
 @auth.require_auth
 def api_syslog_events():
