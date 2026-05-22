@@ -1644,6 +1644,30 @@ def api_threat_intel():
         return jsonify({"error": "threat intel module not available"}), 503
 
 
+@app.route("/api/search")
+@auth.require_auth
+def api_search():
+    """
+    Advanced search across all event types, processes, and network connections.
+
+    Query syntax:
+      category:intrusion  severity:high  host:open-claw01  source:ssh
+      type:alert|auth|fim|beaconing|dns|process|network
+      after:2026-05-20  before:2026-05-22  limit:100
+
+    Returns: {results: [...], total: int, query_parsed: dict}
+    """
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"results": [], "total": 0, "query_parsed": {}, "hint": "Provide a search query with ?q=..."})
+
+    results = detection.search_events(query)
+    return jsonify(results)
+
+
 # ═══════════════════════════════════════════
 # Authentication API Endpoints
 # ═══════════════════════════════════════════
