@@ -443,7 +443,6 @@ def search_events(query_str, limit=200):
     """
     conn = get_db()
     results = []
-    now = time.time()
 
     # Parse query
     parsed = _parse_search_query(query_str)
@@ -848,6 +847,7 @@ def _fts_sanitize(text):
     elif cleaned.strip():
         cleaned = cleaned.strip() + '*'
     return cleaned if cleaned.strip() else '*'
+
 
 def _parse_search_query(query_str):
     """
