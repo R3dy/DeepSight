@@ -936,7 +936,7 @@ def collect_process_detail(pid):
                                     rip_int = int(remote_hex.split(":")[0], 16)
                                     rip2 = ".".join(str((rip_int >> (8*i)) & 0xFF) for i in range(3,-1,-1))
                                     rport = int(remote_hex.split(":")[1], 16)
-                                    smap = {"01":"ESTABLISHED","02":"SYN_SENT","03":"SYN_RECV","04":"FIN_WAIT1","05":"FIN_WAIT2","06":"TIME_WAIT","07":"CLOSE","08":"CLOSE_WAIT","09":"LAST_ACK","0A":"LISTEN","0B":"CLOSING"}
+                                    smap = {"01": "ESTABLISHED", "02": "SYN_SENT", "03": "SYN_RECV", "04": "FIN_WAIT1", "05": "FIN_WAIT2", "06": "TIME_WAIT", "07": "CLOSE", "08": "CLOSE_WAIT", "09": "LAST_ACK", "0A": "LISTEN", "0B": "CLOSING"}
                                     state = smap.get(state_hex, state_hex)
                                     proc_conns.append({
                                         "proto": "tcp" if "tcp" in path else "udp",
@@ -1076,8 +1076,10 @@ def collect_outbound_http():
                                 if "=" in e:
                                     k, v = e.split("=", 1)
                                     if k.strip() == "pid":
-                                        try: pid = int(v.strip())
-                                        except ValueError: pass
+                                        try:
+                                            pid = int(v.strip())
+                                        except ValueError:
+                                            pass
                                         break
                             break
                 except Exception:
@@ -1353,7 +1355,6 @@ def api_cluster():
 @auth.require_auth
 def api_process_detail(pid):
     """Deep forensic detail for a single process (cached)."""
-    global _PROCESS_CACHE
     now = time.time()
     cache_key = str(pid)
     if cache_key in _PROCESS_CACHE:
@@ -1389,7 +1390,7 @@ def api_users():
 @app.route("/install.sh")
 def install_script():
     """Serve the agent install script with embedded secret and collector URL."""
-    collector_url = f"https://your-server.your-tailnet.ts.net:8451"
+    collector_url = "https://your-server.your-tailnet.ts.net:8451"
     script = f"""#!/usr/bin/env bash
 # ── System Dashboard Agent Installer ──
 # Run: curl -sSL {collector_url}/install.sh | sudo bash
@@ -1689,7 +1690,7 @@ def api_auth_login():
             username=username or None,
             ip_address=ip,
             user_agent=request.headers.get("User-Agent", ""),
-            details=f"Rate limit exceeded for login endpoint",
+            details="Rate limit exceeded for login endpoint",
         )
         return jsonify({
             "error": "rate_limited",

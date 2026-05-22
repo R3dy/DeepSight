@@ -19,10 +19,7 @@ Config: config/syslog.example.toml
 import os
 import re
 import sys
-import json
 import time
-import struct
-import socket
 import sqlite3
 import threading
 import socketserver
@@ -210,13 +207,11 @@ def parse_rfc5424(raw):
     pri = int(m.group(1))
     facility = pri // 8
     severity = pri % 8
-    version = m.group(2)
     timestamp_str = m.group(3)
     hostname = m.group(4)
     app_name = m.group(5)
     procid = m.group(6)
     msgid = m.group(7)
-    structured_data = m.group(8) or ""
     message = m.group(9) or ""
 
     # Normalize timestamp (strip trailing Z/offset, handle milliseconds)
@@ -439,8 +434,8 @@ def _notify_alert_engine(parsed):
 
     # Rule 3: NAS login from unusual external IP
     if facility in ("auth", "authpriv") and \
-       ("login" in message.lower() or "session opened" in message.lower() or
-        "connection from" in message.lower()):
+            ("login" in message.lower() or "session opened" in message.lower() or
+             "connection from" in message.lower()):
         ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', message)
         if ip_match:
             src_ip = ip_match.group(1)

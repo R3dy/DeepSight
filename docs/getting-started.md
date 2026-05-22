@@ -121,6 +121,22 @@ sudo rm -rf /opt/sysdash-agent /etc/systemd/system/sysdash-agent.service
 - Agents only report system metrics — no shell access, no file access
 - All traffic goes over HTTPS when using Tailscale Serve
 
+## Enabling Security Monitoring
+
+SIEM detection starts automatically — no configuration required. As soon as the collector is running, DeepSight begins:
+
+- **Process auditing** — watching for reverse shells, webshells, and suspicious parent chains
+- **C2 beaconing detection** — analyzing outbound HTTP patterns for periodic callbacks
+- **Auth monitoring** — tracking SSH failures, sudo usage, and privilege escalations
+- **DNS/DGA detection** — scoring domain entropy to catch malware C2
+- **File integrity monitoring** — watching critical system paths for unauthorized changes
+
+All alerts are stored in a local SQLite database (`alerts.db`) with 30-day retention. Open the **🛡️ Security** tab in the dashboard to view alerts and triage findings.
+
+::: tip Detection is collector-side only
+All SIEM analysis runs on the collector host. Remote agents continue to report standard system metrics — no additional agent overhead or configuration is required for security monitoring.
+:::
+
 ## Troubleshooting
 
 ### Agent not appearing in the dashboard

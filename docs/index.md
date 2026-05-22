@@ -61,6 +61,11 @@ DeepSight includes a built-in SIEM engine that continuously scans your systems:
 
 Every alert is tagged with MITRE ATT&CK technique mappings and severity levels.
 
+<figure class="screenshot">
+  <img src="/screenshots/security-view.png" alt="DeepSight Security view" />
+  <figcaption>Security view — Alert Summary, Active Alerts, C2 Beaconing detection, Auth Events, File Integrity</figcaption>
+</figure>
+
 ## A Note on How This Was Built
 
 DeepSight was vibe-coded with AI assistance — a human describing what they wanted, an AI writing the code, and a lot of back-and-forth iteration. That means some things might be a little quirky. Bugs are features waiting to be discovered. If you find something that doesn't work quite right, or if you think something could be better:

@@ -20,10 +20,7 @@ import json
 import os
 import time
 import threading
-import socket
 import logging
-from collections import defaultdict
-from datetime import datetime, timezone
 
 # ── Optional notification integration ──
 try:
@@ -80,6 +77,7 @@ _log = logging.getLogger("threat_intel").info
 # ═══════════════════════════════════════════
 # Utility Functions
 # ═══════════════════════════════════════════
+
 
 def _fetch_url(url, headers=None, timeout=REQUEST_TIMEOUT):
     """Fetch a URL and return parsed JSON or text, or None on failure."""

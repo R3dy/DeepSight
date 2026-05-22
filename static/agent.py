@@ -5,9 +5,9 @@ Runs on any Linux host, reports stats to a System Dashboard collector.
 
 Usage:
   python3 agent.py                          # uses config.json in same dir
-  python3 agent.py --host my-server \       # override hostname
+  python3 agent.py --host my-server \\       # override hostname
       --collector https://IP:8451 \
-      --api-key dsk_... \
+      --api-key dsk_... \\
       --interval 3
 
 DeepSight 0.4.0+: Use --api-key instead of --secret.
@@ -16,7 +16,6 @@ API keys are created from the dashboard (Settings → API Keys).
 
 import json
 import os
-import sys
 import time
 import glob
 import socket
@@ -264,10 +263,11 @@ def collect_disks():
                     if len(parts) < 3:
                         continue
                     dev, mp, fstype = parts[0], parts[1], parts[2]
-                    if dev.startswith("/dev/loop") or fstype in ("tmpfs", "devtmpfs",
-                            "proc", "sysfs", "cgroup", "cgroup2", "debugfs",
-                            "securityfs", "pstore", "efivarfs", "bpf", "fusectl",
-                            "configfs", "hugetlbfs", "mqueue", "tracefs"):
+                    if dev.startswith("/dev/loop") or fstype in (
+                            "tmpfs", "devtmpfs", "proc", "sysfs", "cgroup",
+                            "cgroup2", "debugfs", "securityfs", "pstore",
+                            "efivarfs", "bpf", "fusectl", "configfs",
+                            "hugetlbfs", "mqueue", "tracefs"):
                         continue
                     if mp == "/snap" or "/snap/" in mp:
                         continue
@@ -489,7 +489,7 @@ def report(config, stats):
 
 def main():
     config = load_config()
-    print(f"═══ System Dashboard Agent ═══")
+    print("═══ System Dashboard Agent ═══")
     print(f"Host:      {config['host']}")
     print(f"Collector: {config['collector_url']}")
     print(f"Interval:  {config['interval']}s")
