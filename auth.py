@@ -12,11 +12,9 @@ DO NOT MODIFY the hash/token schemes without a migration plan.
 """
 
 import hashlib
-import importlib
 import os
 import sqlite3
 import time
-import uuid
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -630,21 +628,21 @@ def init_admin_user() -> str | None:
     os.makedirs(config_dir, exist_ok=True)
     init_file = os.path.join(config_dir, "admin-init.txt")
     with open(init_file, "w") as f:
-        f.write(f"DeepSight Initial Admin Password\n")
-        f.write(f"================================\n")
-        f.write(f"Username: admin\n")
+        f.write("DeepSight Initial Admin Password\n")
+        f.write("================================\n")
+        f.write("Username: admin\n")
         f.write(f"Password: {password}\n")
         f.write(f"\nCreated: {datetime.now(timezone.utc).isoformat()}\n")
-        f.write(f"\nCHANGE THIS PASSWORD on first login.\n")
+        f.write("\nCHANGE THIS PASSWORD on first login.\n")
     os.chmod(init_file, 0o600)
 
-    print(f"\n[auth] ═══════════════════════════════════════════", flush=True)
-    print(f"[auth]  Initial admin user created.", flush=True)
-    print(f"[auth]  Username: admin", flush=True)
+    print("\n[auth] ═══════════════════════════════════════════", flush=True)
+    print("[auth]  Initial admin user created.", flush=True)
+    print("[auth]  Username: admin", flush=True)
     print(f"[auth]  Password: {password}", flush=True)
     print(f"[auth]  Saved to: {init_file}", flush=True)
-    print(f"[auth]  CHANGE THIS PASSWORD on first login.", flush=True)
-    print(f"[auth] ═══════════════════════════════════════════\n", flush=True)
+    print("[auth]  CHANGE THIS PASSWORD on first login.", flush=True)
+    print("[auth] ═══════════════════════════════════════════\n", flush=True)
 
     log_audit(
         event_type="admin_init",
