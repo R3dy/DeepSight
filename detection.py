@@ -17,7 +17,7 @@ import socket
 import sqlite3
 import subprocess
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # ── Optional notifier integration ──
 try:
@@ -745,6 +745,10 @@ def _parse_search_query(query_str):
 
     import re as _re
 
+    # Map field names captured by regex to parsed dict keys
+    # (after/before are parsed as "after_ts"/"before_ts")
+    TIME_FIELD_MAP = {"after": "after_ts", "before": "before_ts"}
+
     # Extract field:value pairs
     field_pattern = _re.compile(
         r'\b(category|severity|host|source|type|after|before|limit):(\S+)'
@@ -753,8 +757,9 @@ def _parse_search_query(query_str):
     for m in field_pattern.finditer(query_str):
         field = m.group(1)
         value = m.group(2)
-        if field in parsed:
-            parsed[field] = value
+        resolved = TIME_FIELD_MAP.get(field, field)
+        if resolved in parsed:
+            parsed[resolved] = value
         # Remove matched text
         remaining = remaining.replace(m.group(0), "", 1)
 
@@ -802,11 +807,11 @@ def _parse_time_string(s):
         unit = rel.group(2)
         dt = datetime.now(timezone.utc)
         if unit == 'h':
-            dt = dt.replace(hour=dt.hour - amount)
+            dt = dt - timedelta(hours=amount)
         elif unit == 'd':
-            dt = dt.replace(day=dt.day - amount)
+            dt = dt - timedelta(days=amount)
         elif unit == 'm':
-            dt = dt.replace(minute=dt.minute - amount)
+            dt = dt - timedelta(minutes=amount)
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     return s
 
