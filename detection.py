@@ -2832,6 +2832,460 @@ def get_alert_stats(hours=24):
 
 
 # ═══════════════════════════════════════════
+# UEBA — User & Entity Behavior Analytics
+# ═══════════════════════════════════════════
+
+BASELINE_WINDOW_SECONDS = 3600   # 1 hour rolling window
+BASELINE_LEARNING_SAMPLES = 30   # no alerts until N samples collected
+BASELINE_COLLECT_INTERVAL = 30   # seconds between baseline samples
+BASELINE_Z_THRESHOLD = 3.0       # default z-score alert threshold
+
+# Per-metric thresholds (some metrics are naturally more volatile)
+BASELINE_Z_THRESHOLDS = {
+    "cpu_percent": 3.0,
+    "ram_used_gb": 3.5,
+    "disk_read_kbps": 4.0,
+    "disk_write_kbps": 4.0,
+    "network_connections": 3.5,
+    "process_count": 3.0,
+}
+
+# Human-readable metric labels
+BASELINE_METRIC_LABELS = {
+    "cpu_percent": "CPU %",
+    "ram_used_gb": "RAM Used (GB)",
+    "disk_read_kbps": "Disk Read (KB/s)",
+    "disk_write_kbps": "Disk Write (KB/s)",
+    "network_connections": "Network Connections",
+    "process_count": "Process Count",
+}
+
+# Tracked metrics — list of (key, description) for the collector
+BASELINE_METRICS = [
+    "cpu_percent",
+    "ram_used_gb",
+    "disk_read_kbps",
+    "disk_write_kbps",
+    "network_connections",
+    "process_count",
+]
+
+
+class BaselineEngine:
+    """Rolling z-score statistical baselining using Welford's online algorithm.
+
+    Maintains per-host rolling statistics for key system metrics.
+    Uses a deque of recent samples (pruned to BASELINE_WINDOW_SECONDS)
+    to compute mean and standard deviation on each update.
+    """
+
+    def __init__(self, db_conn):
+        self.db = db_conn
+        # samples[host][metric] = [(timestamp, value), ...]
+        self.samples = defaultdict(lambda: defaultdict(list))
+        self.lock = threading.Lock()
+        self._create_tables()
+        self._prune_old_anomalies()
+
+    def _create_tables(self):
+        """Create baselines and anomalies tables."""
+        self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS baselines (
+                host TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                count INTEGER DEFAULT 0,
+                mean REAL DEFAULT 0.0,
+                variance REAL DEFAULT 0.0,
+                stddev REAL DEFAULT 0.0,
+                last_value REAL DEFAULT 0.0,
+                is_learning INTEGER DEFAULT 1,
+                last_updated TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (host, metric)
+            );
+
+            CREATE TABLE IF NOT EXISTS anomalies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                host TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                z_score REAL NOT NULL,
+                current_value REAL NOT NULL,
+                mean REAL NOT NULL,
+                stddev REAL NOT NULL,
+                severity TEXT DEFAULT 'medium'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_anomalies_timestamp
+                ON anomalies(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_anomalies_host
+                ON anomalies(host);
+            CREATE INDEX IF NOT EXISTS idx_baselines_host
+                ON baselines(host);
+        """)
+        self.db.commit()
+
+    def _prune_old_anomalies(self):
+        """Remove anomalies older than 7 days."""
+        try:
+            self.db.execute(
+                "DELETE FROM anomalies WHERE timestamp < datetime('now', '-7 days')"
+            )
+            self.db.commit()
+        except Exception:
+            pass
+
+    def update(self, host, metric, value, timestamp=None):
+        """Add a sample and return (z_score, mean, stddev, is_learning).
+
+        Returns (None, value, 0, True) if insufficient data.
+        """
+        if timestamp is None:
+            timestamp = time.time()
+
+        with self.lock:
+            samples = self.samples[host][metric]
+            samples.append((timestamp, float(value)))
+
+            # Prune samples outside the rolling window
+            cutoff = timestamp - BASELINE_WINDOW_SECONDS
+            samples[:] = [(ts, v) for ts, v in samples if ts > cutoff]
+
+            count = len(samples)
+            if count < 2:
+                self._save_state(host, metric, count, value, 0, 0, value, timestamp, True)
+                return (None, value, 0, True)
+
+            # Compute mean and stddev from window samples
+            vals = [v for _, v in samples]
+            mean = sum(vals) / count
+            variance = sum((v - mean) ** 2 for v in vals) / count
+            stddev = math.sqrt(variance) if variance > 1e-9 else 0.001
+
+            is_learning = count < BASELINE_LEARNING_SAMPLES
+
+            # Z-score
+            z_score = (float(value) - mean) / stddev if stddev > 1e-9 else 0.0
+
+            # Persist to DB
+            self._save_state(host, metric, count, mean, variance, stddev, value,
+                             timestamp, is_learning)
+
+            return (z_score, mean, stddev, is_learning)
+
+    def _save_state(self, host, metric, count, mean, variance, stddev, last_value,
+                    timestamp, is_learning):
+        """Persist baseline state to SQLite (idempotent upsert)."""
+        try:
+            now_ts = datetime.fromtimestamp(timestamp, timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ")
+            self.db.execute("""
+                INSERT INTO baselines (host, metric, count, mean, variance, stddev,
+                                       last_value, is_learning, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(host, metric) DO UPDATE SET
+                    count = excluded.count,
+                    mean = excluded.mean,
+                    variance = excluded.variance,
+                    stddev = excluded.stddev,
+                    last_value = excluded.last_value,
+                    is_learning = excluded.is_learning,
+                    last_updated = excluded.last_updated
+            """, (host, metric, count, mean, variance, stddev,
+                  last_value, 1 if is_learning else 0, now_ts))
+            self.db.commit()
+        except Exception as e:
+            _log(f"BaselineEngine _save_state error: {e}")
+
+    def check_and_alert(self, host, metric, z_score, current_value, mean, stddev,
+                        is_learning):
+        """Fire an alert if z-score exceeds threshold and not in learning period."""
+        if is_learning or z_score is None:
+            return None
+
+        threshold = BASELINE_Z_THRESHOLDS.get(metric, BASELINE_Z_THRESHOLD)
+        if abs(z_score) < threshold:
+            return None
+
+        label = BASELINE_METRIC_LABELS.get(metric, metric)
+        direction = "spike" if z_score > 0 else "drop"
+        severity = "high" if abs(z_score) > 5.0 else ("medium" if abs(z_score) > 4.0 else "low")
+
+        # Store anomaly in DB
+        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            self.db.execute("""
+                INSERT INTO anomalies (timestamp, host, metric, z_score,
+                                       current_value, mean, stddev, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (now_ts, host, metric, round(z_score, 3),
+                  round(current_value, 2), round(mean, 2),
+                  round(stddev, 2), severity))
+            self.db.commit()
+        except Exception as e:
+            _log(f"BaselineEngine anomaly insert error: {e}")
+
+        # Create alert via existing alert pipeline
+        alert = create_alert(
+            severity=severity,
+            category="ueba",
+            title=f"Anomaly [{direction}]: {label} on {host} (z={z_score:.2f})",
+            description=(
+                f"Statistical anomaly detected for {label} on {host}.\n"
+                f"Current: {current_value:.2f} | Baseline mean: {mean:.2f} | "
+                f"StdDev: {stddev:.2f} | Z-score: {z_score:.2f}\n"
+                f"Direction: {direction} — threshold: {threshold}"
+            ),
+            source_host=host,
+            mitre_tactic="Discovery",
+            mitre_technique="T1082 (System Information Discovery)",
+            raw_data={
+                "metric": metric,
+                "metric_label": label,
+                "z_score": round(z_score, 3),
+                "current_value": round(current_value, 2),
+                "baseline_mean": round(mean, 2),
+                "baseline_stddev": round(stddev, 2),
+                "direction": direction,
+            },
+        )
+        return alert
+
+    def get_baselines(self, host=None):
+        """Return current baseline state for one or all hosts."""
+        results = []
+        with self.lock:
+            for h, metrics in self.samples.items():
+                if host and h != host:
+                    continue
+                for metric, samples in metrics.items():
+                    if not samples:
+                        continue
+                    vals = [v for _, v in samples]
+                    count = len(vals)
+                    if count < 2:
+                        continue
+                    mean = sum(vals) / count
+                    variance = sum((v - mean) ** 2 for v in vals) / count
+                    stddev = math.sqrt(variance) if variance > 1e-9 else 0.0
+                    last_val = vals[-1]
+                    is_learning = count < BASELINE_LEARNING_SAMPLES
+                    z = (last_val - mean) / stddev if stddev > 1e-9 else 0.0
+
+                    results.append({
+                        "host": h,
+                        "metric": metric,
+                        "label": BASELINE_METRIC_LABELS.get(metric, metric),
+                        "count": count,
+                        "mean": round(mean, 2),
+                        "stddev": round(stddev, 2),
+                        "current_value": round(last_val, 2),
+                        "z_score": round(z, 3),
+                        "is_learning": is_learning,
+                        "threshold": BASELINE_Z_THRESHOLDS.get(metric, BASELINE_Z_THRESHOLD),
+                    })
+
+        # Also include persisted baselines that might not be in memory yet
+        try:
+            rows = self.db.execute(
+                "SELECT * FROM baselines ORDER BY host, metric"
+            ).fetchall()
+            mem_keys = {(r["host"], r["metric"]) for r in results}
+            for r in rows:
+                if (r["host"], r["metric"]) not in mem_keys:
+                    results.append({
+                        "host": r["host"],
+                        "metric": r["metric"],
+                        "label": BASELINE_METRIC_LABELS.get(r["metric"], r["metric"]),
+                        "count": r["count"],
+                        "mean": round(r["mean"], 2),
+                        "stddev": round(r["stddev"], 2),
+                        "current_value": round(r["last_value"], 2),
+                        "z_score": 0.0,
+                        "is_learning": bool(r["is_learning"]),
+                        "threshold": BASELINE_Z_THRESHOLDS.get(r["metric"], BASELINE_Z_THRESHOLD),
+                    })
+        except Exception:
+            pass
+
+        results.sort(key=lambda x: (x["host"], x["metric"]))
+        return results
+
+    def get_anomalies(self, host=None, limit=100, hours=24):
+        """Return recent anomalies from DB."""
+        try:
+            if host:
+                rows = self.db.execute("""
+                    SELECT * FROM anomalies
+                    WHERE host = ? AND timestamp >= datetime('now', ?)
+                    ORDER BY timestamp DESC LIMIT ?
+                """, (host, f"-{hours} hours", limit)).fetchall()
+            else:
+                rows = self.db.execute("""
+                    SELECT * FROM anomalies
+                    WHERE timestamp >= datetime('now', ?)
+                    ORDER BY timestamp DESC LIMIT ?
+                """, (f"-{hours} hours", limit)).fetchall()
+
+            return [{
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "host": r["host"],
+                "metric": r["metric"],
+                "label": BASELINE_METRIC_LABELS.get(r["metric"], r["metric"]),
+                "z_score": r["z_score"],
+                "current_value": r["current_value"],
+                "mean": r["mean"],
+                "stddev": r["stddev"],
+                "severity": r["severity"],
+            } for r in rows]
+        except Exception as e:
+            _log(f"get_anomalies error: {e}")
+            return []
+
+    def get_zscore_history(self, host, metric, hours=1):
+        """Return z-score history for charting (from anomalies table)."""
+        try:
+            rows = self.db.execute("""
+                SELECT timestamp, z_score, current_value, mean
+                FROM anomalies
+                WHERE host = ? AND metric = ?
+                  AND timestamp >= datetime('now', ?)
+                ORDER BY timestamp ASC
+            """, (host, metric, f"-{hours} hours")).fetchall()
+            return [{
+                "timestamp": r["timestamp"],
+                "z_score": r["z_score"],
+                "current_value": r["current_value"],
+                "mean": r["mean"],
+            } for r in rows]
+        except Exception:
+            return []
+
+
+# ── Singleton instance ──
+_baseline_engine = None
+_baseline_lock = threading.Lock()
+
+
+def get_baseline_engine():
+    """Return the singleton BaselineEngine, creating it if needed."""
+    global _baseline_engine
+    if _baseline_engine is None:
+        with _baseline_lock:
+            if _baseline_engine is None:
+                _baseline_engine = BaselineEngine(get_db())
+                _log("UEBA BaselineEngine initialized")
+    return _baseline_engine
+
+
+def _collect_local_metrics():
+    """Collect baseline metrics from the local host."""
+    metrics = {}
+    try:
+        import psutil as _psutil
+
+        # CPU percent
+        metrics["cpu_percent"] = round(_psutil.cpu_percent(interval=0.1), 1)
+
+        # RAM used GB
+        mem = _psutil.virtual_memory()
+        metrics["ram_used_gb"] = round(mem.used / 1024**3, 1)
+
+        # Process count
+        metrics["process_count"] = len(list(_psutil.process_iter()))
+
+        # Network connections
+        try:
+            out = subprocess.check_output(
+                ["ss", "-tn", "state", "established"],
+                text=True, timeout=5, stderr=subprocess.DEVNULL,
+            )
+            metrics["network_connections"] = len(
+                [line for line in out.strip().split("\n")
+                 if line and not line.startswith("State")]
+            )
+        except Exception:
+            metrics["network_connections"] = 0
+
+        # Disk IO (need delta from previous call)
+        try:
+            io = _psutil.disk_io_counters()
+            metrics["_disk_read_bytes"] = io.read_bytes
+            metrics["_disk_write_bytes"] = io.write_bytes
+            # Deltas computed by the collector
+        except Exception:
+            metrics["_disk_read_bytes"] = 0
+            metrics["_disk_write_bytes"] = 0
+
+    except Exception as e:
+        _log(f"_collect_local_metrics error: {e}")
+
+    return metrics
+
+
+# Track previous disk IO for delta calculation
+_prev_disk_io = {"read_bytes": 0, "write_bytes": 0, "ts": 0}
+_prev_disk_lock = threading.Lock()
+
+
+def baseline_collector():
+    """Background thread: collect metrics every BASELINE_COLLECT_INTERVAL seconds,
+    update baselines, and fire anomaly alerts."""
+    global _prev_disk_io
+    _log(f"baseline_collector started (interval={BASELINE_COLLECT_INTERVAL}s, "
+         f"window={BASELINE_WINDOW_SECONDS}s, learning={BASELINE_LEARNING_SAMPLES})")
+
+    host = socket.gethostname()
+    engine = get_baseline_engine()
+
+    while True:
+        try:
+            metrics = _collect_local_metrics()
+            now = time.time()
+
+            # Compute disk IO deltas
+            disk_read_kbps = 0.0
+            disk_write_kbps = 0.0
+            with _prev_disk_lock:
+                if _prev_disk_io["ts"] > 0:
+                    dt = now - _prev_disk_io["ts"]
+                    if dt > 0.5:
+                        dr = metrics.get("_disk_read_bytes", 0)
+                        dw = metrics.get("_disk_write_bytes", 0)
+                        disk_read_kbps = round(
+                            (dr - _prev_disk_io["read_bytes"]) / dt / 1024, 1)
+                        disk_write_kbps = round(
+                            (dw - _prev_disk_io["write_bytes"]) / dt / 1024, 1)
+                _prev_disk_io = {
+                    "read_bytes": metrics.pop("_disk_read_bytes", 0),
+                    "write_bytes": metrics.pop("_disk_write_bytes", 0),
+                    "ts": now,
+                }
+
+            # Add disk IO deltas to metrics
+            metrics["disk_read_kbps"] = max(0, disk_read_kbps)
+            metrics["disk_write_kbps"] = max(0, disk_write_kbps)
+
+            # Update baselines for each metric
+            for metric_key in BASELINE_METRICS:
+                value = metrics.get(metric_key)
+                if value is None:
+                    continue
+
+                result = engine.update(host, metric_key, value, now)
+                if result:
+                    z_score, mean, stddev, is_learning = result
+                    engine.check_and_alert(
+                        host, metric_key, z_score, value, mean, stddev, is_learning
+                    )
+
+        except Exception as e:
+            _log(f"baseline_collector error: {e}")
+
+        time.sleep(BASELINE_COLLECT_INTERVAL)
+
+
+# ═══════════════════════════════════════════
 # Startup
 # ═══════════════════════════════════════════
 
@@ -2877,12 +3331,16 @@ def start_collectors():
         except Exception as e:
             _log(f"Threat intel collector failed to start: {e}")
 
+    # Initialize baseline engine early (creates tables)
+    get_baseline_engine()
+
     collectors = [
         ("process_audit", process_audit_collector),
         ("beaconing", beaconing_collector),
         ("auth_monitor", auth_monitor),
         ("dns", dns_collector),
         ("file_integrity", file_integrity_collector),
+        ("baseline", baseline_collector),
     ]
 
     for name, func in collectors:
