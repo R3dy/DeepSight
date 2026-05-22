@@ -708,7 +708,7 @@ def search_events(query_str, limit=200):
     if search_process:
         try:
             import psutil as _psutil
-            for proc in _psutil.process_iter(["pid", "name", "cmdline", "username", "memory_info", "cpu_percent"]):
+            for proc in _psutil.process_iter(["pid", "name", "cmdline", "username", "memory_info"]):
                 try:
                     info = proc.info
                     name = info["name"] or ""
