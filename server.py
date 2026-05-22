@@ -102,7 +102,7 @@ def collect_local_stats():
 
     ram_procs = []
     cpu_procs = []
-    for proc in psutil.process_iter(["pid", "name", "memory_info", "cpu_percent"]):
+    for proc in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
             info = proc.info
             rss = info["memory_info"].rss
@@ -407,7 +407,7 @@ def collect_cpu_temp():
 def collect_process_deep(top_n=5):
     """Get PSS/USS for top memory processes via smaps_rollup."""
     procs = []
-    for proc in psutil.process_iter(["pid", "name", "memory_info", "cpu_percent",
+    for proc in psutil.process_iter(["pid", "name", "memory_info",
                                        "cpu_times", "num_threads", "status", "username"]):
         try:
             info = proc.info
