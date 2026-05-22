@@ -41,11 +41,7 @@ except ImportError:
     HAS_THREAT_INTEL = False
 
 # ── Optional imports ──
-try:
-    import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
+HAS_PSUTIL = True
 
 try:
     from inotify_simple import INotify, flags as in_flags
@@ -94,7 +90,7 @@ WEB_SERVER_USERS = {"www-data", "apache", "nginx", "httpd", "lighttpd", "caddy"}
 REVERSE_SHELL_PATTERNS = [
     # bash -i >& /dev/tcp/ip/port 0>&1
     (r"bash.*-i.*>&\s*/dev/tcp/", "bash reverse shell (interactive + /dev/tcp)"),
-    # /bin/bash -i  
+    # /bin/bash -i
     (r"bash\s+-i\s+.*/dev/tcp/", "bash reverse shell"),
     # bash >& /dev/tcp/ip/port
     (r"bash\s+.*>&\s*/dev/tcp/", "bash reverse shell (/dev/tcp redirect)"),
@@ -1434,7 +1430,6 @@ _beacon_tracker_lock = threading.Lock()
 
 def _collect_outbound_connections():
     """Collect established outbound connections using ss -tnp (non-root)."""
-    http_ports = {80, 443, 8080, 8443, 3000, 8000, 8888, 9090}
     connections = []
 
     try:
@@ -1536,7 +1531,7 @@ def _collect_outbound_connections():
                         )
                 except Exception:
                     pass
-    except Exception as e:
+    except Exception:
         pass
 
     return connections
@@ -1555,8 +1550,6 @@ def _start_packet_sniffer():
 
 def _packet_sniffer_loop():
     """Capture HTTP request lines and TLS SNI from outbound connections via tcpdump."""
-    global _http_metadata
-
     # Ports we inspect for HTTP/TLS
     target_ports = "80 or 443 or 8080 or 8443 or 3000 or 8000 or 8888 or 9090 or 7443"
     backoff = 10
@@ -1768,7 +1761,6 @@ def beaconing_collector():
     """Analyze outbound connection timing for C2 beaconing patterns."""
     _log("beaconing_collector started (interval={}s, window={}s)".format(
         INTERVAL_BEACONING, BEACONING_WINDOW_S))
-    global _beacon_tracker
 
     while True:
         try:
@@ -2033,8 +2025,6 @@ def auth_monitor():
         _log(f"auth_monitor: cannot read {AUTH_LOG} — skipping")
         return
 
-    global _ssh_fail_tracker, _auth_log_pos
-
     while True:
         try:
             # Read new lines from auth.log (tail the last 200 lines each iteration)
@@ -2125,14 +2115,12 @@ def dns_collector():
                     stderr=subprocess.DEVNULL, text=True, timeout=5,
                 )
                 # Parse DNS stats
-                cache_size = 0
-                queries = 0
                 for line in out.split("\n"):
                     if "Current Cache Size" in line:
-                        cache_size = int(line.split(":")[1].strip())
+                        pass
                     if "Transactions" in line or "Total Queries" in line:
                         try:
-                            queries = int(line.split(":")[1].strip().split()[0])
+                            pass
                         except Exception:
                             pass
             except Exception:
@@ -2232,7 +2220,6 @@ def file_integrity_collector():
 def _file_integrity_polling():
     """Poll mtime for sensitive files every 2 seconds."""
     _log("file_integrity: using polling fallback (inotify_simple not available)")
-    global _file_mtimes
 
     # Seed mtimes
     poll_files = [f for f in SENSITIVE_FILES if not f.endswith("/")]
@@ -2394,7 +2381,6 @@ def _scan_tmp_executables():
                     with open(fpath, "rb") as f:
                         header = f.read(4)
                     if header[:4] == b"\x7fELF" or header[:2] == b"#!":
-                        global _file_mtimes
                         mtime = os.stat(fpath).st_mtime
                         prev = _file_mtimes.get(fpath)
                         if prev is None:
@@ -2685,7 +2671,7 @@ _collectors_running = False
 
 def start_collectors():
     """Start all background collector threads."""
-    global _collector_threads, _collectors_running
+    global _collectors_running
     if _collectors_running:
         _log("Collectors already running, skipping")
         return
