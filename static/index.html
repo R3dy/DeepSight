@@ -1207,10 +1207,111 @@
     word-break: break-all; line-height: 1.35;
   }
 
+  /* ── UEBA Anomaly Detection ── */
+  .sec-ueba-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .sec-ueba-grid .card { min-width: 0; }
+
+  /* Baseline deviation table */
+  .sec-baseline-table {
+    width: 100%; border-collapse: collapse; font-size: 0.62rem;
+  }
+  .sec-baseline-table th {
+    text-align: left; font-size: 0.56rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0 0 8px 0;
+    position: sticky; top: 0; background: var(--bg-card); z-index: 1;
+  }
+  .sec-baseline-table td {
+    padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.025);
+    vertical-align: middle;
+  }
+  .sec-baseline-metric {
+    font-weight: 600; font-size: 0.65rem; color: var(--text-primary);
+  }
+  .sec-baseline-host {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--accent-violet);
+  }
+  .sec-baseline-current {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.65rem;
+    font-weight: 600;
+  }
+  .sec-baseline-mean {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+    color: var(--text-muted);
+  }
+  .sec-baseline-z {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; font-weight: 700;
+  }
+  .sec-baseline-z.critical { color: var(--accent-red); }
+  .sec-baseline-z.high { color: var(--accent-orange); }
+  .sec-baseline-z.medium { color: var(--accent-yellow); }
+  .sec-baseline-z.low { color: var(--accent-cyan); }
+  .sec-baseline-learning {
+    font-size: 0.55rem; font-style: italic; color: var(--text-muted);
+  }
+  .sec-baseline-bar-wrap {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sec-baseline-bar {
+    flex: 1; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.05); overflow: hidden;
+    min-width: 30px;
+  }
+  .sec-baseline-bar-fill {
+    height: 100%; border-radius: 2px; transition: width 0.5s ease;
+  }
+
+  /* Anomaly list widget */
+  .sec-anomaly-list {
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: 360px; overflow-y: auto;
+  }
+  .sec-anomaly-list::-webkit-scrollbar { width: 4px; }
+  .sec-anomaly-list::-webkit-scrollbar-track { background: transparent; }
+  .sec-anomaly-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .sec-anomaly-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: var(--radius-sm);
+    background: rgba(255,255,255,0.012); font-size: 0.68rem;
+    transition: background 0.2s; border: 1px solid transparent;
+  }
+  .sec-anomaly-row:hover { background: rgba(255,255,255,0.025); border-color: var(--border); }
+  .sec-anomaly-row.sev-low { border-left: 3px solid var(--accent-cyan); }
+  .sec-anomaly-row.sev-medium { border-left: 3px solid var(--accent-yellow); }
+  .sec-anomaly-row.sev-high { border-left: 3px solid var(--accent-orange); }
+  .sec-anomaly-row.sev-critical { border-left: 3px solid var(--accent-red); }
+
+  .sec-anomaly-icon { font-size: 1rem; flex-shrink: 0; }
+  .sec-anomaly-detail { flex: 1; min-width: 0; }
+  .sec-anomaly-title {
+    font-weight: 600; font-size: 0.68rem;
+    margin-bottom: 2px;
+  }
+  .sec-anomaly-stats {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--text-muted);
+  }
+  .sec-anomaly-z {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700;
+    text-align: right; white-space: nowrap;
+  }
+  .sec-anomaly-z.positive { color: var(--accent-red); }
+  .sec-anomaly-z.negative { color: var(--accent-cyan); }
+
+  .sec-anomaly-time {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.55rem;
+    color: var(--text-muted); white-space: nowrap;
+  }
+
   @media (max-width: 860px) {
     .sec-summary-row { grid-template-columns: repeat(2, 1fr); }
     .sec-alerts-list { max-height: 360px; }
     .sec-file-path { max-width: 140px; }
+    .sec-ueba-grid { grid-template-columns: 1fr; }
   }
 
   /* ── Footer ── */
@@ -1656,6 +1757,68 @@
         </select>
       </div>
       <div class="sec-syslog-list" id="sec-syslog-list">
+        <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+      </div>
+    </div>
+
+    <!-- ═══ UEBA Anomaly Detection ═══ -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">📊 Anomaly Detection</span>
+        <span class="card-badge" id="sec-ueba-badge">baselining</span>
+      </div>
+      <div class="sec-substats" id="sec-ueba-substats">
+        <span>Baselines: <span class="sec-substat" id="sec-ueba-baseline-count">—</span></span>
+        <span>|</span>
+        <span>Learning: <span class="sec-substat" id="sec-ueba-learning-count">—</span></span>
+        <span>|</span>
+        <span>Window: <span class="sec-substat" id="sec-ueba-window">1h</span></span>
+        <span>|</span>
+        <span>Threshold: <span class="sec-substat" id="sec-ueba-threshold">z=3.0</span></span>
+      </div>
+    </div>
+
+    <!-- ROW: Anomaly Z-Score Chart + Baseline Deviation Table -->
+    <div class="sec-ueba-grid">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📉 Anomaly Timeline</span>
+          <span class="card-badge" id="sec-anomaly-chart-badge">1h</span>
+        </div>
+        <div class="sec-chart-wrap timeline">
+          <canvas id="chart-anomaly-timeline"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📋 Baseline Deviation</span>
+          <span class="card-badge" id="sec-baseline-badge">live</span>
+        </div>
+        <div style="max-height:260px;overflow-y:auto;padding:8px 14px;">
+          <table class="sec-baseline-table" id="sec-baseline-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Current</th>
+                <th>Mean</th>
+                <th>Z-Score</th>
+              </tr>
+            </thead>
+            <tbody id="sec-baseline-tbody">
+              <tr><td colspan="4"><div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW: Recent Anomalies List -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">⚠️ Recent Anomalies</span>
+        <span class="card-badge" id="sec-anomalies-badge">0 events</span>
+      </div>
+      <div class="sec-anomaly-list" id="sec-anomaly-list">
         <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
       </div>
     </div>
@@ -2560,6 +2723,7 @@ let chartMitreRadar = null;
 let chartAlertSeverity = null;
 let chartAgentHealth = null;
 let chartEventTypes = null;
+let chartAnomalyTimeline = null;
 
 function initClusterCharts() {
   const ramCtx = document.getElementById('clusterRamChart');
@@ -3674,6 +3838,11 @@ function startSecurityPolling() {
   fetchThreatIntel();
   // Security dashboards — initialized lazily on first tab switch
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchSecurityDashboards(); }, 30000));
+  // UEBA anomaly panels
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchBaselines(); }, 10000));
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchAnomalies(); }, 10000));
+  fetchBaselines();
+  fetchAnomalies();
 }
 
 // ═══════════════════════════════════════════
@@ -3782,6 +3951,28 @@ function initSecurityCharts() {
       animation: { duration: 400 },
     }
   });
+
+  // ── Anomaly Z-Score Timeline ──
+  const anCtx = document.getElementById('chart-anomaly-timeline').getContext('2d');
+  chartAnomalyTimeline = new Chart(anCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [
+      { label: 'CPU %', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.06)', borderWidth: 2, fill: false, tension: 0.3 },
+      { label: 'RAM GB', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.06)', borderWidth: 2, fill: false, tension: 0.3 },
+      { label: 'Threshold (±3)', data: [], borderColor: 'rgba(239,68,68,0.3)', borderWidth: 1, borderDash: [4,4], fill: false, pointRadius: 0 },
+      { label: 'Threshold (−3)', data: [], borderColor: 'rgba(239,68,68,0.3)', borderWidth: 1, borderDash: [4,4], fill: false, pointRadius: 0 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 9 }, maxTicksLimit: 10 } },
+        y: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5a6378', font: { family: 'JetBrains Mono', size: 9 } } }
+      },
+      plugins: { legend: { position: 'top', align: 'end', labels: { color: '#8892a8', font: { size: 10 }, boxWidth: 10, padding: 10, usePointStyle: true, filter: item => !item.text.startsWith('Threshold (') } } },
+      animation: { duration: 400 },
+    }
+  });
 }
 
 async function fetchSecurityDashboards() {
@@ -3872,6 +4063,7 @@ function renderSecurityDashboards(data) {
 function stopSecurityPolling() {
   securityPollIntervals.forEach(clearInterval);
   securityPollIntervals = [];
+  if (chartAnomalyTimeline) { chartAnomalyTimeline.destroy(); chartAnomalyTimeline = null; }
 }
 
 let lastSecuritySummary = null;
@@ -4235,6 +4427,265 @@ const TI_SOURCE_LABELS = {
   feodo: 'Feodo Tracker',
   tor: 'Tor Exit Nodes',
 };
+
+// ═══════════════════════════════════════════
+// UEBA Anomaly Detection
+// ═══════════════════════════════════════════
+
+async function fetchBaselines() {
+  try {
+    const res = await fetch('/api/baselines');
+    const data = await res.json();
+    renderBaselines(data);
+  } catch (e) {
+    console.error('baselines fetch error:', e);
+  }
+}
+
+async function fetchAnomalies() {
+  try {
+    const res = await fetch('/api/anomalies');
+    const data = await res.json();
+    renderAnomalies(data);
+  } catch (e) {
+    console.error('anomalies fetch error:', e);
+  }
+}
+
+function renderBaselines(data) {
+  const baselines = data.baselines || [];
+  const config = data.config || {};
+
+  document.getElementById('sec-ueba-baseline-count').textContent = data.count || 0;
+  document.getElementById('sec-ueba-learning-count').textContent = data.learning || 0;
+  document.getElementById('sec-ueba-window').textContent =
+    (config.window_seconds ? Math.round(config.window_seconds / 60) + 'm' : '1h');
+  document.getElementById('sec-ueba-threshold').textContent =
+    'z=' + (config.default_threshold || 3.0).toFixed(1);
+
+  const tbody = document.getElementById('sec-baseline-tbody');
+  document.getElementById('sec-baseline-badge').textContent =
+    (data.active || 0) + ' active, ' + (data.learning || 0) + ' learning';
+
+  if (!baselines.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted);">Gathering baseline data...</td></tr>';
+    return;
+  }
+
+  // Group by host for chart — use first host's data for the timeline
+  const byHost = {};
+  baselines.forEach(b => {
+    if (!byHost[b.host]) byHost[b.host] = [];
+    byHost[b.host].push(b);
+  });
+
+  // Render table
+  let html = '';
+  let rowIdx = 0;
+  baselines.forEach(b => {
+    const absZ = Math.abs(b.z_score || 0);
+    let zClass = 'low';
+    if (absZ >= 5) zClass = 'critical';
+    else if (absZ >= 4) zClass = 'high';
+    else if (absZ >= 3) zClass = 'medium';
+
+    // Bar fill based on z-score relative to threshold
+    const t = b.threshold || 3.0;
+    const barPct = Math.min(100, (absZ / t) * 100);
+    const barColor = absZ >= 5 ? 'var(--accent-red)' :
+      absZ >= 4 ? 'var(--accent-orange)' :
+      absZ >= 3 ? 'var(--accent-yellow)' :
+      absZ >= 2 ? 'var(--accent-cyan)' : 'var(--accent-violet)';
+
+    html += `<tr>
+      <td>
+        <div class="sec-baseline-metric">${b.label || b.metric}</div>
+        <div class="sec-baseline-host">${b.host}</div>
+        ${b.is_learning ? '<span class="sec-baseline-learning">learning (' + b.count + ' samples)</span>' : ''}
+      </td>
+      <td><span class="sec-baseline-current">${b.current_value?.toFixed(1) ?? '—'}</span></td>
+      <td><span class="sec-baseline-mean">μ=${b.mean?.toFixed(1) ?? '—'}</span></td>
+      <td>
+        <div class="sec-baseline-bar-wrap">
+          <span class="sec-baseline-z ${zClass}">${(b.z_score || 0).toFixed(2)}</span>
+          <div class="sec-baseline-bar"><div class="sec-baseline-bar-fill" style="width:${barPct}%;background:${barColor};"></div></div>
+        </div>
+      </td>
+    </tr>`;
+    rowIdx++;
+  });
+
+  tbody.innerHTML = html;
+
+  // Update anomaly timeline chart with z-scores
+  updateAnomalyTimelineChart(baselines);
+}
+
+function renderAnomalies(data) {
+  const anomalies = data.anomalies || [];
+  const el = document.getElementById('sec-anomaly-list');
+  document.getElementById('sec-anomalies-badge').textContent =
+    (data.count || 0) + ' events';
+
+  // Update anomaly counts badge
+  const sevCounts = data.severity_counts || {};
+  const totalSev = (sevCounts.high || 0) + (sevCounts.medium || 0) + (sevCounts.low || 0) + (sevCounts.critical || 0);
+  document.getElementById('sec-ueba-badge').textContent =
+    totalSev > 0 ? '⚠ ' + totalSev + ' anomalies' : 'baselining';
+  if (totalSev > 0) {
+    document.getElementById('sec-ueba-badge').style.color = 'var(--accent-red)';
+  } else {
+    document.getElementById('sec-ueba-badge').style.color = '';
+  }
+
+  if (!anomalies.length) {
+    el.innerHTML = '<div class="sec-empty"><span class="sec-empty-icon">✅</span>No anomalies detected</div>';
+    return;
+  }
+
+  const shown = anomalies.slice(0, 50);
+  const sevIcons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' };
+
+  el.innerHTML = shown.map(a => {
+    const sev = a.severity || 'low';
+    const icon = sevIcons[sev] || '⚪';
+    const zClass = (a.z_score || 0) >= 0 ? 'positive' : 'negative';
+    const time = formatTimeAgo(a.timestamp);
+
+    return `<div class="sec-anomaly-row sev-${sev}">
+      <span class="sec-anomaly-icon">${icon}</span>
+      <div class="sec-anomaly-detail">
+        <div class="sec-anomaly-title">
+          ${a.label || a.metric}
+          <span style="font-size:0.6rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">on ${a.host}</span>
+        </div>
+        <div class="sec-anomaly-stats">
+          Current: ${a.current_value?.toFixed(1) ?? '—'} |
+          Mean: ${a.mean?.toFixed(1) ?? '—'} |
+          σ: ${a.stddev?.toFixed(1) ?? '—'}
+        </div>
+      </div>
+      <span class="sec-anomaly-time">${time}</span>
+      <span class="sec-anomaly-z ${zClass}">z=${(a.z_score || 0).toFixed(2)}</span>
+    </div>`;
+  }).join('');
+
+  // Update anomaly timeline with actual z-score events
+  updateAnomalyTimelineFromEvents(anomalies);
+}
+
+function updateAnomalyTimelineChart(baselines) {
+  if (!chartAnomalyTimeline) return;
+
+  // Use z-scores from baseline data
+  // Build synthetic timeline: we know current values are z-scores relative to baseline
+  // For a proper timeline, we need historical z-scores. Use the anomalies API.
+  // For now, show current z-scores as the latest data point.
+  const now = new Date();
+  const labels = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now - i * 600000); // 10-min intervals
+    labels.push(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  }
+
+  // Find CPU and RAM baseline data
+  const cpuB = baselines.find(b => b.metric === 'cpu_percent');
+  const ramB = baselines.find(b => b.metric === 'ram_used_gb');
+
+  // Show current z-score as latest point, previous as neutral
+  const cpuData = [0, 0, 0, 0, 0, cpuB?.z_score || 0];
+  const ramData = [0, 0, 0, 0, 0, ramB?.z_score || 0];
+  const thresholdData = labels.map(() => 3.0);
+  const negThresholdData = labels.map(() => -3.0);
+
+  // Don't overwrite if we have real event data
+  if (chartAnomalyTimeline._hasEventData) return;
+
+  chartAnomalyTimeline.data.labels = labels;
+  chartAnomalyTimeline.data.datasets[0].data = cpuData;
+  chartAnomalyTimeline.data.datasets[1].data = ramData;
+  chartAnomalyTimeline.data.datasets[2].data = thresholdData;
+  chartAnomalyTimeline.data.datasets[3].data = negThresholdData;
+  chartAnomalyTimeline.update('none');
+}
+
+function updateAnomalyTimelineFromEvents(anomalies) {
+  if (!chartAnomalyTimeline || !anomalies.length) return;
+
+  chartAnomalyTimeline._hasEventData = true;
+
+  // Build time-series from anomaly events, grouped by metric
+  const sorted = [...anomalies].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const labels = sorted.map(a => {
+    const d = new Date(a.timestamp + 'Z');
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  });
+
+  // Get distinct metrics for separate datasets
+  const metrics = [...new Set(sorted.map(a => a.metric))];
+  const metricColors = {
+    cpu_percent: '#06b6d4',
+    ram_used_gb: '#8b5cf6',
+    disk_read_kbps: '#10b981',
+    disk_write_kbps: '#f59e0b',
+    network_connections: '#f97316',
+    process_count: '#ec4899',
+  };
+
+  // Build datasets
+  const datasets = metrics.slice(0, 4).map((m, idx) => ({
+    label: m.replace(/_/g, ' '),
+    data: sorted.filter(a => a.metric === m).map(a => a.z_score),
+    borderColor: metricColors[m] || `hsl(${idx * 60}, 70%, 60%)`,
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    fill: false,
+    tension: 0.3,
+    spanGaps: true,
+  }));
+
+  // Add threshold lines
+  datasets.push({
+    label: 'Threshold (+3)',
+    data: labels.map(() => 3.0),
+    borderColor: 'rgba(239,68,68,0.3)',
+    borderWidth: 1,
+    borderDash: [4, 4],
+    fill: false,
+    pointRadius: 0,
+  });
+  datasets.push({
+    label: 'Threshold (−3)',
+    data: labels.map(() => -3.0),
+    borderColor: 'rgba(239,68,68,0.3)',
+    borderWidth: 1,
+    borderDash: [4, 4],
+    fill: false,
+    pointRadius: 0,
+  });
+
+  chartAnomalyTimeline.data.labels = labels;
+  chartAnomalyTimeline.data.datasets = datasets;
+  chartAnomalyTimeline.update('none');
+
+  document.getElementById('sec-anomaly-chart-badge').textContent =
+    sorted.length + ' events';
+}
+
+// ── Helper: format time ago for display ──
+function formatTimeAgo(ts) {
+  try {
+    const d = new Date(ts + 'Z');
+    const now = new Date();
+    const diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  } catch (e) {
+    return ts || '';
+  }
+}
 
 async function fetchThreatIntel() {
   try {
