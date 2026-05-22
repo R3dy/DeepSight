@@ -17,7 +17,7 @@ import socket
 import sqlite3
 import subprocess
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # ── Optional notifier integration ──
 try:
@@ -41,11 +41,7 @@ except ImportError:
     HAS_THREAT_INTEL = False
 
 # ── Optional imports ──
-try:
-    import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
+HAS_PSUTIL = True
 
 try:
     from inotify_simple import INotify, flags as in_flags
@@ -94,7 +90,7 @@ WEB_SERVER_USERS = {"www-data", "apache", "nginx", "httpd", "lighttpd", "caddy"}
 REVERSE_SHELL_PATTERNS = [
     # bash -i >& /dev/tcp/ip/port 0>&1
     (r"bash.*-i.*>&\s*/dev/tcp/", "bash reverse shell (interactive + /dev/tcp)"),
-    # /bin/bash -i  
+    # /bin/bash -i
     (r"bash\s+-i\s+.*/dev/tcp/", "bash reverse shell"),
     # bash >& /dev/tcp/ip/port
     (r"bash\s+.*>&\s*/dev/tcp/", "bash reverse shell (/dev/tcp redirect)"),
@@ -227,7 +223,28 @@ def _create_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_beaconing_timestamp ON beaconing_events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_dns_events_timestamp ON dns_events(timestamp);
+
+        -- FTS5 virtual tables for full-text search
+        CREATE VIRTUAL TABLE IF NOT EXISTS alerts_fts USING fts5(
+            title, description, content='alerts', content_rowid='id'
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS auth_events_fts USING fts5(
+            username, source_ip, details, content='auth_events', content_rowid='id'
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS file_events_fts USING fts5(
+            path, content='file_events', content_rowid='id'
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS beaconing_fts USING fts5(
+            process_name, remote_ip, remote_host, http_path, tls_sni, user_agent,
+            content='beaconing_events', content_rowid='id'
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS dns_events_fts USING fts5(
+            domain, content='dns_events', content_rowid='id'
+        );
     """)
+    # ── FTS5 sync triggers — keep indexes in sync with source tables ──
+    _create_fts_triggers(conn)
+
     # ── Schema migrations for new columns ──
     _migrate_beaconing_schema(conn)
     conn.commit()
@@ -247,6 +264,678 @@ def _migrate_beaconing_schema(conn):
     for col_name, col_def in new_cols:
         if col_name not in existing:
             conn.execute(f"ALTER TABLE beaconing_events ADD COLUMN {col_name} {col_def}")
+
+
+def _create_fts_triggers(conn):
+    """Create INSERT/UPDATE/DELETE triggers so FTS5 indexes stay in sync."""
+    # alerts_fts (columns: title, description)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS alerts_fts_ai AFTER INSERT ON alerts BEGIN
+            INSERT INTO alerts_fts(rowid, title, description)
+            VALUES (new.id, new.title, new.description);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS alerts_fts_ad AFTER DELETE ON alerts BEGIN
+            INSERT INTO alerts_fts(alerts_fts, rowid, title, description)
+            VALUES ('delete', old.id, old.title, old.description);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS alerts_fts_au AFTER UPDATE ON alerts BEGIN
+            INSERT INTO alerts_fts(alerts_fts, rowid, title, description)
+            VALUES ('delete', old.id, old.title, old.description);
+            INSERT INTO alerts_fts(rowid, title, description)
+            VALUES (new.id, new.title, new.description);
+        END
+    """)
+
+    # auth_events_fts (columns: username, source_ip, details)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS auth_events_fts_ai AFTER INSERT ON auth_events BEGIN
+            INSERT INTO auth_events_fts(rowid, username, source_ip, details)
+            VALUES (new.id, new.username, new.source_ip, new.details);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS auth_events_fts_ad AFTER DELETE ON auth_events BEGIN
+            INSERT INTO auth_events_fts(auth_events_fts, rowid, username, source_ip, details)
+            VALUES ('delete', old.id, old.username, old.source_ip, old.details);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS auth_events_fts_au AFTER UPDATE ON auth_events BEGIN
+            INSERT INTO auth_events_fts(auth_events_fts, rowid, username, source_ip, details)
+            VALUES ('delete', old.id, old.username, old.source_ip, old.details);
+            INSERT INTO auth_events_fts(rowid, username, source_ip, details)
+            VALUES (new.id, new.username, new.source_ip, new.details);
+        END
+    """)
+
+    # file_events_fts (columns: path)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS file_events_fts_ai AFTER INSERT ON file_events BEGIN
+            INSERT INTO file_events_fts(rowid, path)
+            VALUES (new.id, new.path);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS file_events_fts_ad AFTER DELETE ON file_events BEGIN
+            INSERT INTO file_events_fts(file_events_fts, rowid, path)
+            VALUES ('delete', old.id, old.path);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS file_events_fts_au AFTER UPDATE ON file_events BEGIN
+            INSERT INTO file_events_fts(file_events_fts, rowid, path)
+            VALUES ('delete', old.id, old.path);
+            INSERT INTO file_events_fts(rowid, path)
+            VALUES (new.id, new.path);
+        END
+    """)
+
+    # beaconing_fts (columns: process_name, remote_ip, remote_host, http_path, tls_sni, user_agent)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS beaconing_fts_ai AFTER INSERT ON beaconing_events BEGIN
+            INSERT INTO beaconing_fts(rowid, process_name, remote_ip, remote_host,
+                                     http_path, tls_sni, user_agent)
+            VALUES (new.id, new.process_name, new.remote_ip, new.remote_host,
+                    new.http_path, new.tls_sni, new.user_agent);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS beaconing_fts_ad AFTER DELETE ON beaconing_events BEGIN
+            INSERT INTO beaconing_fts(beaconing_fts, rowid, process_name, remote_ip,
+                                     remote_host, http_path, tls_sni, user_agent)
+            VALUES ('delete', old.id, old.process_name, old.remote_ip, old.remote_host,
+                    old.http_path, old.tls_sni, old.user_agent);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS beaconing_fts_au AFTER UPDATE ON beaconing_events BEGIN
+            INSERT INTO beaconing_fts(beaconing_fts, rowid, process_name, remote_ip,
+                                     remote_host, http_path, tls_sni, user_agent)
+            VALUES ('delete', old.id, old.process_name, old.remote_ip, old.remote_host,
+                    old.http_path, old.tls_sni, old.user_agent);
+            INSERT INTO beaconing_fts(rowid, process_name, remote_ip, remote_host,
+                                     http_path, tls_sni, user_agent)
+            VALUES (new.id, new.process_name, new.remote_ip, new.remote_host,
+                    new.http_path, new.tls_sni, new.user_agent);
+        END
+    """)
+
+    # dns_events_fts (columns: domain)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS dns_events_fts_ai AFTER INSERT ON dns_events BEGIN
+            INSERT INTO dns_events_fts(rowid, domain)
+            VALUES (new.id, new.domain);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS dns_events_fts_ad AFTER DELETE ON dns_events BEGIN
+            INSERT INTO dns_events_fts(dns_events_fts, rowid, domain)
+            VALUES ('delete', old.id, old.domain);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS dns_events_fts_au AFTER UPDATE ON dns_events BEGIN
+            INSERT INTO dns_events_fts(dns_events_fts, rowid, domain)
+            VALUES ('delete', old.id, old.domain);
+            INSERT INTO dns_events_fts(rowid, domain)
+            VALUES (new.id, new.domain);
+        END
+    """)
+
+
+def rebuild_fts_indexes():
+    """Rebuild all FTS5 indexes from existing data. Called on startup."""
+    _log("Rebuilding FTS5 full-text search indexes...")
+    conn = get_db()
+    try:
+        # alerts_fts
+        conn.execute("INSERT INTO alerts_fts(alerts_fts) VALUES('rebuild')")
+        _log("  alerts_fts: rebuilt")
+    except Exception as e:
+        _log(f"  alerts_fts rebuild: {e}")
+    try:
+        # auth_events_fts
+        conn.execute("INSERT INTO auth_events_fts(auth_events_fts) VALUES('rebuild')")
+        _log("  auth_events_fts: rebuilt")
+    except Exception as e:
+        _log(f"  auth_events_fts rebuild: {e}")
+    try:
+        # file_events_fts
+        conn.execute("INSERT INTO file_events_fts(file_events_fts) VALUES('rebuild')")
+        _log("  file_events_fts: rebuilt")
+    except Exception as e:
+        _log(f"  file_events_fts rebuild: {e}")
+    try:
+        # beaconing_fts
+        conn.execute("INSERT INTO beaconing_fts(beaconing_fts) VALUES('rebuild')")
+        _log("  beaconing_fts: rebuilt")
+    except Exception as e:
+        _log(f"  beaconing_fts rebuild: {e}")
+    try:
+        # dns_events_fts
+        conn.execute("INSERT INTO dns_events_fts(dns_events_fts) VALUES('rebuild')")
+        _log("  dns_events_fts: rebuilt")
+    except Exception as e:
+        _log(f"  dns_events_fts rebuild: {e}")
+    conn.commit()
+    _log("FTS5 indexes rebuilt successfully")
+
+
+def search_events(query_str, limit=200):
+    """
+    Search across all event types (alerts, auth, file, beaconing, dns)
+    with field-level query syntax and free-text search.
+
+    Query syntax:
+      category:intrusion  severity:high  host:open-claw01  source:ssh
+      type:alert|auth|file|beaconing|dns|process|network
+      after:2026-05-20  before:2026-05-22
+
+    Returns: {results: [...], total: int, query_parsed: dict}
+    """
+    conn = get_db()
+    results = []
+
+    # Parse query
+    parsed = _parse_search_query(query_str)
+    free_text = parsed["free_text"]
+    category = parsed.get("category")
+    severity = parsed.get("severity")
+    host_filter = parsed.get("host")
+    source = parsed.get("source")
+    event_type = parsed.get("type")  # filter by event source type
+    after_ts = parsed.get("after_ts")
+    before_ts = parsed.get("before_ts")
+    limit = parsed.get("limit", limit)
+
+    # Determine which sources to search
+    search_alerts = not event_type or event_type in ("alert",)
+    search_auth = not event_type or event_type in ("auth",)
+    search_file = not event_type or event_type in ("fim", "file")
+    search_beaconing = not event_type or event_type in ("beaconing",)
+    search_dns = not event_type or event_type in ("dns",)
+    search_process = not event_type or event_type in ("process",)
+    search_network = not event_type or event_type in ("network",)
+
+    # ── 1. Alerts ──
+    if search_alerts:
+        try:
+            q = "SELECT * FROM alerts WHERE 1=1 "
+            params = []
+            if free_text:
+                # Use FTS5 for free-text search on alerts
+                q = """
+                    SELECT a.* FROM alerts a
+                    JOIN alerts_fts f ON a.id = f.rowid
+                    WHERE alerts_fts MATCH ?
+                """
+                params = [_fts_sanitize(free_text)]
+            if category:
+                q += " AND category = ?"
+                params.append(category)
+            if severity:
+                q += " AND severity = ?"
+                params.append(severity)
+            if after_ts:
+                q += " AND timestamp >= ?"
+                params.append(after_ts)
+            if before_ts:
+                q += " AND timestamp <= ?"
+                params.append(before_ts)
+            q += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(q, params).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "alert",
+                    "icon": "🚨",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "severity": r["severity"],
+                    "timestamp": r["timestamp"],
+                    "host": r["source_host"] or "",
+                    "source": r["source_ip"] or "",
+                    "category": r["category"],
+                    "metadata": {
+                        "mitre_tactic": r["mitre_tactic"],
+                        "mitre_technique": r["mitre_technique"],
+                        "process_name": r["process_name"],
+                        "process_pid": r["process_pid"],
+                        "acknowledged": bool(r["acknowledged"]),
+                    },
+                })
+        except Exception as e:
+            _log(f"search alerts error: {e}")
+
+    # ── 2. Auth events ──
+    if search_auth:
+        try:
+            q = "SELECT * FROM auth_events WHERE 1=1 "
+            params = []
+            if free_text:
+                q = """
+                    SELECT a.* FROM auth_events a
+                    JOIN auth_events_fts f ON a.id = f.rowid
+                    WHERE auth_events_fts MATCH ?
+                """
+                params = [_fts_sanitize(free_text)]
+            if source:
+                q += " AND source_ip LIKE ?"
+                params.append(f"%{source}%")
+            if after_ts:
+                q += " AND timestamp >= ?"
+                params.append(after_ts)
+            if before_ts:
+                q += " AND timestamp <= ?"
+                params.append(before_ts)
+            q += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(q, params).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "auth",
+                    "icon": "🔑",
+                    "id": r["id"],
+                    "title": f"{r['event_type']} — {r['username'] or '?'}",
+                    "description": r["details"] or "",
+                    "severity": "high" if r["event_type"] == "ssh_fail" and (dict(r).get("count_window_10s", 0) or 0) > 3 else "medium",
+                    "timestamp": r["timestamp"],
+                    "host": "",
+                    "source": r["source_ip"] or "",
+                    "category": r["event_type"],
+                    "metadata": {
+                        "username": r["username"],
+                        "count_window_10s": dict(r).get("count_window_10s", 1) or 1,
+                    },
+                })
+        except Exception as e:
+            _log(f"search auth_events error: {e}")
+
+    # ── 3. File events ──
+    if search_file:
+        try:
+            q = "SELECT * FROM file_events WHERE 1=1 "
+            params = []
+            if free_text:
+                q = """
+                    SELECT f.* FROM file_events f
+                    JOIN file_events_fts ft ON f.id = ft.rowid
+                    WHERE file_events_fts MATCH ?
+                """
+                params = [_fts_sanitize(free_text)]
+            if after_ts:
+                q += " AND timestamp >= ?"
+                params.append(after_ts)
+            if before_ts:
+                q += " AND timestamp <= ?"
+                params.append(before_ts)
+            q += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(q, params).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "fim",
+                    "icon": "📁",
+                    "id": r["id"],
+                    "title": f"File {r['event_type']}: {r['path']}",
+                    "description": r["path"] or "",
+                    "severity": "high",
+                    "timestamp": r["timestamp"],
+                    "host": "",
+                    "source": "",
+                    "category": "file_integrity",
+                    "metadata": {
+                        "event_type": r["event_type"],
+                        "process_name": r["process_name"],
+                        "process_pid": r["process_pid"],
+                    },
+                })
+        except Exception as e:
+            _log(f"search file_events error: {e}")
+
+    # ── 4. Beaconing events ──
+    if search_beaconing:
+        try:
+            q = "SELECT * FROM beaconing_events WHERE 1=1 "
+            params = []
+            if free_text:
+                q = """
+                    SELECT b.* FROM beaconing_events b
+                    JOIN beaconing_fts bf ON b.id = bf.rowid
+                    WHERE beaconing_fts MATCH ?
+                """
+                params = [_fts_sanitize(free_text)]
+            if source:
+                q += " AND (remote_ip LIKE ? OR remote_host LIKE ?)"
+                params.extend([f"%{source}%", f"%{source}%"])
+            if after_ts:
+                q += " AND timestamp >= ?"
+                params.append(after_ts)
+            if before_ts:
+                q += " AND timestamp <= ?"
+                params.append(before_ts)
+            q += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(q, params).fetchall()
+            for r in rows:
+                target = r["remote_host"] or r["remote_ip"]
+                results.append({
+                    "type": "beaconing",
+                    "icon": "📡",
+                    "id": r["id"],
+                    "title": f"{r['process_name']} → {target}:{r['remote_port']}",
+                    "description": (
+                        f"Beacon-like behavior: interval {r['interval_seconds']}s, "
+                        f"confidence {r['confidence']}, {r['sample_count']} samples"
+                    ),
+                    "severity": "high",
+                    "timestamp": r["timestamp"],
+                    "host": "",
+                    "source": r["remote_ip"],
+                    "category": "beaconing",
+                    "metadata": {
+                        "process_name": r["process_name"],
+                        "pid": r["pid"],
+                        "remote_ip": r["remote_ip"],
+                        "remote_host": r["remote_host"],
+                        "remote_port": r["remote_port"],
+                        "interval_seconds": r["interval_seconds"],
+                        "confidence": r["confidence"],
+                        "tls_sni": r["tls_sni"],
+                        "http_method": r["http_method"],
+                        "http_path": r["http_path"],
+                    },
+                })
+        except Exception as e:
+            _log(f"search beaconing error: {e}")
+
+    # ── 5. DNS events ──
+    if search_dns:
+        try:
+            q = "SELECT * FROM dns_events WHERE 1=1 "
+            params = []
+            if free_text:
+                q = """
+                    SELECT d.* FROM dns_events d
+                    JOIN dns_events_fts df ON d.id = df.rowid
+                    WHERE dns_events_fts MATCH ?
+                """
+                params = [_fts_sanitize(free_text)]
+            if after_ts:
+                q += " AND timestamp >= ?"
+                params.append(after_ts)
+            if before_ts:
+                q += " AND timestamp <= ?"
+                params.append(before_ts)
+            q += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(q, params).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "dns",
+                    "icon": "🌐",
+                    "id": r["id"],
+                    "title": f"DNS: {r['domain']}",
+                    "description": (
+                        f"Domain: {r['domain']}, entropy: {r['entropy_score']}, "
+                        f"DGA: {'yes' if r['is_dga'] else 'no'}"
+                    ),
+                    "severity": "medium" if r["is_dga"] else "low",
+                    "timestamp": r["timestamp"],
+                    "host": "",
+                    "source": "",
+                    "category": "dns",
+                    "metadata": {
+                        "domain": r["domain"],
+                        "entropy_score": r["entropy_score"],
+                        "is_dga": bool(r["is_dga"]),
+                    },
+                })
+        except Exception as e:
+            _log(f"search dns_events error: {e}")
+
+    # ── 6. Active processes (in-memory, from current stats) ──
+    if search_process:
+        try:
+            import psutil as _psutil
+            for proc in _psutil.process_iter(["pid", "name", "cmdline", "username", "memory_info"]):
+                try:
+                    info = proc.info
+                    name = info["name"] or ""
+                    cmd = " ".join(info.get("cmdline") or []) if info.get("cmdline") else name
+                    searchable = f"{name} {cmd} {info.get('username', '')}"
+
+                    if free_text and free_text.lower() not in searchable.lower():
+                        continue
+                    if host_filter and host_filter.lower() not in socket.gethostname().lower():
+                        continue
+
+                    mem_mb = round((info.get("memory_info") or _psutil._common.smem(0)).rss / 1024**2, 1)
+                    results.append({
+                        "type": "process",
+                        "icon": "⚙️",
+                        "id": info["pid"],
+                        "title": f"{name} (PID {info['pid']})",
+                        "description": (cmd[:300] if cmd != name else name) or name,
+                        "severity": "low",
+                        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "host": socket.gethostname(),
+                        "source": "",
+                        "category": "process",
+                        "metadata": {
+                            "pid": info["pid"],
+                            "user": info.get("username", ""),
+                            "cpu_percent": round(info.get("cpu_percent", 0) or 0, 1),
+                            "memory_mb": mem_mb,
+                        },
+                    })
+                except Exception:
+                    continue
+        except Exception as e:
+            _log(f"search processes error: {e}")
+
+    # ── 7. Network connections ──
+    if search_network:
+        try:
+            import subprocess as _sp
+            out = _sp.check_output(
+                ["ss", "-tnp", "state", "established"],
+                text=True, timeout=5, stderr=_sp.DEVNULL
+            )
+            for line in out.strip().split("\n")[1:]:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                remote = parts[3] if len(parts) > 3 else ""
+                if ":" not in remote:
+                    continue
+                remote_ip = ":".join(remote.split(":")[:-1])
+                remote_port = remote.split(":")[-1]
+                if remote_ip in ("127.0.0.1", "0.0.0.0", "::1", "[::1]", "*"):
+                    continue
+
+                proc_name = "?"
+                proc_pid = None
+                proc_field = parts[-1] if parts else ""
+                if "users:" in proc_field:
+                    try:
+                        inner = proc_field.split("users:(")[1].rstrip(")")
+                        for chunk in inner.split("),("):
+                            chunk = chunk.strip("()")
+                            elems = [e.strip('"') for e in chunk.split(",")]
+                            if len(elems) >= 1:
+                                proc_name = elems[0]
+                                for e in elems[1:]:
+                                    if "=" in e:
+                                        kv = e.split("=", 1)
+                                        if kv[0].strip() == "pid":
+                                            try:
+                                                proc_pid = int(kv[1].strip())
+                                            except ValueError:
+                                                pass
+                                            break
+                                break
+                    except Exception:
+                        pass
+
+                searchable = f"{proc_name} {remote_ip} {remote_port}"
+                if free_text and free_text.lower() not in searchable.lower():
+                    continue
+
+                results.append({
+                    "type": "network",
+                    "icon": "🔗",
+                    "id": proc_pid or 0,
+                    "title": f"{proc_name} → {remote_ip}:{remote_port}",
+                    "description": f"Outbound connection from {proc_name} to {remote_ip}:{remote_port}",
+                    "severity": "low",
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "host": socket.gethostname(),
+                    "source": remote_ip,
+                    "category": "network",
+                    "metadata": {
+                        "process_name": proc_name,
+                        "pid": proc_pid,
+                        "remote_ip": remote_ip,
+                        "remote_port": int(remote_port) if remote_port.isdigit() else remote_port,
+                    },
+                })
+        except Exception as e:
+            _log(f"search network error: {e}")
+
+    # Sort results by timestamp (newest first)
+    results.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    # Trim to limit
+    total = len(results)
+    results = results[:limit]
+
+    return {
+        "results": results,
+        "total": total,
+        "query_parsed": parsed,
+    }
+
+
+def _fts_sanitize(text):
+    """Sanitize user text for FTS5 MATCH query. Escapes special chars."""
+    # FTS5 special chars: - " * ( )
+    # Remove them to avoid syntax errors; keep alphanumeric, spaces, and basic punctuation
+    import re as _re
+    cleaned = _re.sub(r'[()\\[\\]{}~@#$%^&+=|\\\\<>]', '', text)
+    # Strip leading hyphens (FTS5 NOT operator) to avoid zero-result queries
+    cleaned = cleaned.lstrip('-')
+    # Escape double quotes
+    cleaned = cleaned.replace('"', '""')
+    # If text has multiple words, wrap in quotes for phrase matching
+    if ' ' in cleaned.strip():
+        cleaned = f'"{cleaned.strip()}"'
+    elif cleaned.strip():
+        cleaned = cleaned.strip() + '*'
+    return cleaned if cleaned.strip() else '*'
+
+
+def _parse_search_query(query_str):
+    """
+    Parse a search query string into structured fields.
+    Supports: field:value syntax, time ranges, free text.
+    """
+    if not query_str:
+        query_str = ""
+
+    parsed = {
+        "free_text": "",
+        "category": None,
+        "severity": None,
+        "host": None,
+        "source": None,
+        "type": None,
+        "after_ts": None,
+        "before_ts": None,
+        "limit": 200,
+    }
+
+    import re as _re
+
+    # Map field names captured by regex to parsed dict keys
+    # (after/before are parsed as "after_ts"/"before_ts")
+    TIME_FIELD_MAP = {"after": "after_ts", "before": "before_ts"}
+
+    # Extract field:value pairs
+    field_pattern = _re.compile(
+        r'\b(category|severity|host|source|type|after|before|limit):(\S+)'
+    )
+    remaining = query_str
+    for m in field_pattern.finditer(query_str):
+        field = m.group(1)
+        value = m.group(2)
+        resolved = TIME_FIELD_MAP.get(field, field)
+        if resolved in parsed:
+            parsed[resolved] = value
+        # Remove matched text
+        remaining = remaining.replace(m.group(0), "", 1)
+
+    # Clean up remaining free text
+    parsed["free_text"] = " ".join(remaining.split()).strip()
+
+    # Parse timestamps
+    if parsed["after_ts"]:
+        parsed["after_ts"] = _parse_time_string(parsed["after_ts"])
+    if parsed["before_ts"]:
+        parsed["before_ts"] = _parse_time_string(parsed["before_ts"])
+
+    # Parse limit
+    if parsed["limit"]:
+        try:
+            parsed["limit"] = int(parsed["limit"])
+        except ValueError:
+            parsed["limit"] = 200
+
+    return parsed
+
+
+def _parse_time_string(s):
+    """Parse a time string like '2026-05-20' or '2026-05-20T14:30:00Z' into ISO format."""
+    if not s:
+        return None
+    s = s.strip().rstrip("Z")
+    # Try ISO format
+    try:
+        datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+        return s + "Z"
+    except ValueError:
+        pass
+    # Try date-only
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return s + "T00:00:00Z"
+    except ValueError:
+        pass
+    # Try relative: 24h, 7d, etc.
+    import re as _re
+    rel = _re.match(r'^(\d+)([hdm])$', s)
+    if rel:
+        amount = int(rel.group(1))
+        unit = rel.group(2)
+        dt = datetime.now(timezone.utc)
+        if unit == 'h':
+            dt = dt - timedelta(hours=amount)
+        elif unit == 'd':
+            dt = dt - timedelta(days=amount)
+        elif unit == 'm':
+            dt = dt - timedelta(minutes=amount)
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return s
 
 
 def _log(msg):
@@ -741,7 +1430,6 @@ _beacon_tracker_lock = threading.Lock()
 
 def _collect_outbound_connections():
     """Collect established outbound connections using ss -tnp (non-root)."""
-    http_ports = {80, 443, 8080, 8443, 3000, 8000, 8888, 9090}
     connections = []
 
     try:
@@ -843,7 +1531,7 @@ def _collect_outbound_connections():
                         )
                 except Exception:
                     pass
-    except Exception as e:
+    except Exception:
         pass
 
     return connections
@@ -862,8 +1550,6 @@ def _start_packet_sniffer():
 
 def _packet_sniffer_loop():
     """Capture HTTP request lines and TLS SNI from outbound connections via tcpdump."""
-    global _http_metadata
-
     # Ports we inspect for HTTP/TLS
     target_ports = "80 or 443 or 8080 or 8443 or 3000 or 8000 or 8888 or 9090 or 7443"
     backoff = 10
@@ -1075,7 +1761,6 @@ def beaconing_collector():
     """Analyze outbound connection timing for C2 beaconing patterns."""
     _log("beaconing_collector started (interval={}s, window={}s)".format(
         INTERVAL_BEACONING, BEACONING_WINDOW_S))
-    global _beacon_tracker
 
     while True:
         try:
@@ -1340,8 +2025,6 @@ def auth_monitor():
         _log(f"auth_monitor: cannot read {AUTH_LOG} — skipping")
         return
 
-    global _ssh_fail_tracker, _auth_log_pos
-
     while True:
         try:
             # Read new lines from auth.log (tail the last 200 lines each iteration)
@@ -1432,14 +2115,12 @@ def dns_collector():
                     stderr=subprocess.DEVNULL, text=True, timeout=5,
                 )
                 # Parse DNS stats
-                cache_size = 0
-                queries = 0
                 for line in out.split("\n"):
                     if "Current Cache Size" in line:
-                        cache_size = int(line.split(":")[1].strip())
+                        pass
                     if "Transactions" in line or "Total Queries" in line:
                         try:
-                            queries = int(line.split(":")[1].strip().split()[0])
+                            pass
                         except Exception:
                             pass
             except Exception:
@@ -1539,7 +2220,6 @@ def file_integrity_collector():
 def _file_integrity_polling():
     """Poll mtime for sensitive files every 2 seconds."""
     _log("file_integrity: using polling fallback (inotify_simple not available)")
-    global _file_mtimes
 
     # Seed mtimes
     poll_files = [f for f in SENSITIVE_FILES if not f.endswith("/")]
@@ -1701,7 +2381,6 @@ def _scan_tmp_executables():
                     with open(fpath, "rb") as f:
                         header = f.read(4)
                     if header[:4] == b"\x7fELF" or header[:2] == b"#!":
-                        global _file_mtimes
                         mtime = os.stat(fpath).st_mtime
                         prev = _file_mtimes.get(fpath)
                         if prev is None:
@@ -1992,7 +2671,7 @@ _collectors_running = False
 
 def start_collectors():
     """Start all background collector threads."""
-    global _collector_threads, _collectors_running
+    global _collectors_running
     if _collectors_running:
         _log("Collectors already running, skipping")
         return
@@ -2005,6 +2684,9 @@ def start_collectors():
 
     # Initialize DB (creates tables)
     get_db()
+
+    # Rebuild FTS5 search indexes from existing data
+    rebuild_fts_indexes()
 
     # Start packet sniffer for HTTP/TLS metadata (runs independently)
     _start_packet_sniffer()

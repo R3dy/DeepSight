@@ -587,6 +587,216 @@
     .btn { font-size: 0.65rem; padding: 6px 12px; }
   }
 
+  /* ── Search Bar ── */
+  .search-wrap {
+    position: relative; display: flex; align-items: center;
+    margin: 0 8px; flex: 0 1 420px; min-width: 200px;
+  }
+  .search-input {
+    width: 100%; background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-primary); font-family: 'Inter', sans-serif;
+    font-size: 0.72rem; padding: 8px 36px 8px 14px; border-radius: 20px;
+    outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .search-input:focus {
+    border-color: var(--accent-violet);
+    box-shadow: 0 0 12px rgba(139,92,246,0.15);
+  }
+  .search-input::placeholder { color: var(--text-muted); font-size: 0.7rem; }
+  .search-clear {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 0.8rem; padding: 2px 4px; border-radius: 50%;
+    line-height: 1; display: none;
+  }
+  .search-clear.visible { display: block; }
+  .search-clear:hover { color: var(--accent-red); }
+  .search-btn {
+    background: var(--accent-violet); color: white; border: none;
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 0.68rem;
+    padding: 8px 14px; border-radius: 20px; cursor: pointer;
+    margin-left: 6px; transition: all 0.2s; white-space: nowrap;
+  }
+  .search-btn:hover { background: #7c3aed; box-shadow: 0 2px 12px var(--accent-violet-glow); }
+
+  /* Search history dropdown */
+  .search-history-dropdown {
+    position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); z-index: 50;
+    overflow: hidden; display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .search-history-dropdown.visible { display: block; }
+  .search-history-item {
+    padding: 8px 14px; font-size: 0.7rem; color: var(--text-secondary);
+    cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.02);
+    display: flex; justify-content: space-between; align-items: center;
+    transition: background 0.15s;
+  }
+  .search-history-item:hover { background: rgba(139,92,246,0.08); color: var(--text-primary); }
+  .search-history-item:last-child { border-bottom: none; }
+  .search-history-remove {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 0.65rem; padding: 2px 6px;
+    border-radius: 4px; transition: color 0.15s;
+  }
+  .search-history-remove:hover { color: var(--accent-red); }
+  .search-history-clear {
+    padding: 6px 14px; font-size: 0.62rem; color: var(--text-muted);
+    text-align: center; cursor: pointer; border-top: 1px solid var(--border);
+    transition: color 0.15s;
+  }
+  .search-history-clear:hover { color: var(--accent-red); }
+
+  /* Search autocomplete (field suggestions) */
+  .search-autocomplete {
+    position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); z-index: 50; overflow: hidden;
+    display: none; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .search-autocomplete.visible { display: block; }
+  .search-autocomplete-item {
+    padding: 6px 14px; font-size: 0.68rem; color: var(--text-secondary);
+    cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+    transition: background 0.15s;
+  }
+  .search-autocomplete-item:hover { background: rgba(139,92,246,0.08); color: var(--text-primary); }
+  .search-autocomplete-item strong { color: var(--accent-violet); }
+
+  /* ── Search Results View ── */
+  .search-results-view { margin-top: 16px; }
+  .search-results-view.hidden { display: none; }
+  .search-results-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+  }
+  .search-results-title {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+    font-weight: 700; color: var(--text-primary);
+  }
+  .search-results-count { font-size: 0.7rem; color: var(--text-muted); }
+
+  /* Type filter tabs */
+  .search-type-filters {
+    display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .search-type-tab {
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 0.62rem;
+    padding: 4px 12px; border: 1px solid var(--border); cursor: pointer;
+    background: transparent; color: var(--text-muted); border-radius: 14px;
+    transition: all 0.2s;
+  }
+  .search-type-tab.active {
+    background: rgba(139,92,246,0.2); color: var(--text-primary);
+    border-color: rgba(139,92,246,0.4);
+  }
+  .search-type-tab:hover:not(.active) { color: var(--text-secondary); border-color: rgba(255,255,255,0.1); }
+  .search-type-count {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    margin-left: 3px; opacity: 0.6;
+  }
+
+  /* Results table */
+  .search-results-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 0.7rem;
+  }
+  .search-results-table thead {
+    position: sticky; top: 0; z-index: 1;
+  }
+  .search-results-table th {
+    text-align: left; padding: 8px 12px;
+    font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-muted);
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none; white-space: nowrap;
+    transition: color 0.15s;
+  }
+  .search-results-table th:hover { color: var(--accent-violet); }
+  .search-results-table th.sorted { color: var(--accent-violet); }
+  .search-results-table th .sort-arrow { font-size: 0.5rem; margin-left: 2px; }
+  .search-results-table td {
+    padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.02);
+    vertical-align: middle;
+  }
+  .search-results-table tbody tr {
+    transition: background 0.15s; cursor: pointer;
+  }
+  .search-results-table tbody tr:hover { background: rgba(139,92,246,0.04); }
+  .search-results-table tbody tr.expanded { background: rgba(139,92,246,0.06); }
+  .search-result-type {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+    color: var(--text-muted); white-space: nowrap;
+  }
+  .search-result-timestamp {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+    color: var(--text-secondary); white-space: nowrap;
+  }
+  .search-result-severity {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
+  }
+  .badge-critical { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+  .badge-high { background: rgba(249,115,22,0.15); color: var(--accent-orange); }
+  .badge-medium { background: rgba(245,158,11,0.15); color: var(--accent-yellow); }
+  .badge-low { background: rgba(16,185,129,0.15); color: var(--accent-green); }
+  .search-result-host {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.6rem;
+    color: var(--text-secondary); white-space: nowrap;
+  }
+  .search-result-title {
+    font-weight: 600; color: var(--text-primary); max-width: 400px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .search-result-actions { white-space: nowrap; }
+  .search-result-expand {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    cursor: pointer; font-size: 0.65rem; padding: 2px 8px;
+    border-radius: 6px; transition: all 0.15s;
+  }
+  .search-result-expand:hover { color: var(--accent-violet); border-color: rgba(139,92,246,0.3); }
+
+  /* Expanded row detail */
+  .search-result-detail {
+    display: none; padding: 12px 16px;
+    background: rgba(0,0,0,0.15); border-top: 1px solid rgba(139,92,246,0.1);
+    font-size: 0.65rem; color: var(--text-secondary);
+  }
+  .search-result-detail.visible { display: block; }
+  .search-result-detail-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+  }
+  .search-result-detail-item {
+    display: flex; justify-content: space-between; padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.015);
+  }
+  .search-result-detail-item .k { color: var(--text-muted); }
+  .search-result-detail-item .v {
+    font-family: 'JetBrains Mono', monospace; font-weight: 600;
+    color: var(--text-primary); max-width: 200px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .search-result-desc {
+    margin-top: 8px; padding: 8px 12px;
+    background: rgba(0,0,0,0.2); border-radius: 6px;
+    font-size: 0.65rem; line-height: 1.5;
+    max-height: 120px; overflow-y: auto;
+  }
+
+  /* Search loading / empty */
+  .search-loading {
+    text-align: center; padding: 40px 20px; color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+  .search-empty {
+    text-align: center; padding: 60px 20px; color: var(--text-muted);
+  }
+  .search-empty-icon { font-size: 2rem; display: block; margin-bottom: 12px; }
+
   /* ── Security View ── */
   .security-view.hidden { display: none; }
   .sec-dashboard { display: flex; flex-direction: column; gap: 16px; }
@@ -1069,7 +1279,21 @@
       </div>
     </div>
     <div class="header-right">
-      <button id="logout-btn" onclick="doLogout()" title="Sign out">Sign Out</button>
+      <button id="logout-btn" onclick="doLogout()" title="Sign out" style="display:none">Sign Out</button>
+      <!-- Search bar -->
+      <div class="search-wrap" id="search-wrap">
+        <input type="text" class="search-input" id="search-input"
+               placeholder="🔍  Search logs, alerts, processes…"
+               autocomplete="off"
+               onfocus="showSearchHistory()"
+               onblur="hideSearchHistory()"
+               oninput="handleSearchInput(this.value)"
+               onkeydown="if(event.key==='Enter')doSearch()">
+        <button class="search-clear" id="search-clear" onclick="clearSearch()">✕</button>
+        <div class="search-autocomplete" id="search-autocomplete"></div>
+        <div class="search-history-dropdown" id="search-history-dropdown"></div>
+      </div>
+      <button class="search-btn" onclick="doSearch()">Search</button>
       <div class="tab-nav">
         <button class="tab-btn active" onclick="switchView('detail')" id="tab-detail">Detail</button>
         <button class="tab-btn" onclick="switchView('security')" id="tab-security">🛡️ Security</button>
@@ -1423,6 +1647,34 @@
 
   </div>
   </div><!-- /security-view -->
+
+  <!-- ═══ Search Results View ═══ -->
+  <div class="search-results-view hidden" id="search-results-view">
+    <div class="card card-full">
+      <div class="search-results-header">
+        <div>
+          <div class="search-results-title" id="search-results-title">🔍 Search Results</div>
+          <div class="search-results-count" id="search-results-count"></div>
+        </div>
+        <div class="search-type-filters" id="search-type-filters"></div>
+      </div>
+      <div style="max-height:65vh;overflow-y:auto" id="search-results-scroll">
+        <table class="search-results-table">
+          <thead>
+            <tr>
+              <th onclick="sortSearchResults('type')" id="search-th-type">Type <span class="sort-arrow"></span></th>
+              <th onclick="sortSearchResults('timestamp')" id="search-th-timestamp">Timestamp <span class="sort-arrow"></span></th>
+              <th onclick="sortSearchResults('severity')" id="search-th-severity">Severity <span class="sort-arrow"></span></th>
+              <th onclick="sortSearchResults('host')" id="search-th-host">Host <span class="sort-arrow"></span></th>
+              <th onclick="sortSearchResults('title')" id="search-th-title">Title / Description <span class="sort-arrow"></span></th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="search-results-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /search-results-view -->
 
   <div class="footer">DeepSight · your-server · <a href="/docs/" style="color:var(--text-muted)">docs</a></div>
 </div><!-- /container -->
@@ -2208,6 +2460,11 @@ function switchView(view) {
   document.getElementById('tab-overview').classList.toggle('active', view === 'overview');
   document.getElementById('tab-security').classList.toggle('active', view === 'security');
 
+  // Hide search results when switching to other views
+  if (!activeSearchQuery) {
+    document.getElementById('search-results-view').classList.add('hidden');
+  }
+
   if (view === 'overview') {
     fetchOverview();
   } else if (view === 'security') {
@@ -2943,6 +3200,370 @@ let securityPollIntervals = [];
 let securityDataReady = false;
 let securityAlertAcked = new Set();
 
+// ═══════════════════════════════════════════
+// Search — Advanced Query Interface
+// ═══════════════════════════════════════════
+const SEARCH_HISTORY_KEY = 'deepsight_search_history';
+const MAX_SEARCH_HISTORY = 10;
+const FIELD_SUGGESTIONS = [
+  { field: 'category:', desc: 'Alert category (intrusion, brute_force, beaconing, …)' },
+  { field: 'severity:', desc: 'critical, high, medium, low' },
+  { field: 'host:', desc: 'Hostname filter' },
+  { field: 'source:', desc: 'Source IP or process' },
+  { field: 'type:', desc: 'alert, auth, fim, beaconing, dns, process, network' },
+  { field: 'after:', desc: 'Start time (2026-05-20, 24h, 7d)' },
+  { field: 'before:', desc: 'End time (2026-05-22)' },
+];
+
+let searchResults = [];
+let searchSortCol = 'timestamp';
+let searchSortDir = -1;  // -1 = descending (newest first)
+let searchTypeFilter = 'all';
+let activeSearchQuery = '';
+
+function getSearchHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveSearchHistory(query) {
+  if (!query.trim()) return;
+  let history = getSearchHistory();
+  history = history.filter(h => h !== query);
+  history.unshift(query);
+  if (history.length > MAX_SEARCH_HISTORY) history = history.slice(0, MAX_SEARCH_HISTORY);
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
+  } catch (e) {}
+}
+
+function showSearchHistory() {
+  const history = getSearchHistory();
+  const dd = document.getElementById('search-history-dropdown');
+  const ac = document.getElementById('search-autocomplete');
+  if (history.length === 0) {
+    dd.classList.remove('visible');
+    return;
+  }
+  let html = '';
+  history.forEach((q, i) => {
+    html += `<div class="search-history-item" onmousedown="event.preventDefault();applySearchHistory('${escHtml(q)}')">
+      <span>🕐 ${escHtml(q)}</span>
+      <button class="search-history-remove" onmousedown="event.preventDefault();event.stopPropagation();removeSearchHistory(${i})">✕</button>
+    </div>`;
+  });
+  html += `<div class="search-history-clear" onmousedown="event.preventDefault();clearSearchHistory()">Clear history</div>`;
+  dd.innerHTML = html;
+  dd.classList.add('visible');
+  ac.classList.remove('visible');
+}
+
+function hideSearchHistory() {
+  setTimeout(() => {
+    document.getElementById('search-history-dropdown').classList.remove('visible');
+    document.getElementById('search-autocomplete').classList.remove('visible');
+  }, 200);
+}
+
+function applySearchHistory(query) {
+  document.getElementById('search-input').value = query;
+  document.getElementById('search-history-dropdown').classList.remove('visible');
+  doSearch();
+}
+
+function removeSearchHistory(index) {
+  let history = getSearchHistory();
+  history.splice(index, 1);
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
+  } catch (e) {}
+  showSearchHistory();
+}
+
+function clearSearchHistory() {
+  try {
+    localStorage.removeItem(SEARCH_HISTORY_KEY);
+  } catch (e) {}
+  document.getElementById('search-history-dropdown').classList.remove('visible');
+}
+
+function handleSearchInput(value) {
+  const clearBtn = document.getElementById('search-clear');
+  if (value.length > 0) {
+    clearBtn.classList.add('visible');
+  } else {
+    clearBtn.classList.remove('visible');
+  }
+
+  // Show autocomplete for field: suggestions
+  const ac = document.getElementById('search-autocomplete');
+  const dd = document.getElementById('search-history-dropdown');
+
+  if (!value.trim()) {
+    ac.classList.remove('visible');
+    return;
+  }
+
+  // Only show field suggestions when the cursor is at the end and we can suggest
+  // Check if last word looks like the start of a field name
+  const words = value.split(/\s+/);
+  const lastWord = words[words.length - 1] || '';
+
+  const matches = FIELD_SUGGESTIONS.filter(f => {
+    // Match partial field names (e.g., "cat" → "category:", "sev" → "severity:")
+    if (lastWord.length < 2) return false;
+    return f.field.startsWith(lastWord.toLowerCase());
+  });
+
+  if (matches.length > 0) {
+    dd.classList.remove('visible');
+    let html = '';
+    matches.forEach(m => {
+      const prefix = value.slice(0, value.lastIndexOf(lastWord));
+      const completion = prefix + m.field;
+      html += `<div class="search-autocomplete-item" onmousedown="event.preventDefault();applyAutocomplete('${escHtml(completion)}')">
+        <strong>${escHtml(m.field)}</strong> ${escHtml(m.desc)}
+      </div>`;
+    });
+    ac.innerHTML = html;
+    ac.classList.add('visible');
+  } else {
+    ac.classList.remove('visible');
+  }
+}
+
+function applyAutocomplete(text) {
+  const input = document.getElementById('search-input');
+  input.value = text;
+  input.focus();
+  document.getElementById('search-autocomplete').classList.remove('visible');
+  handleSearchInput(text);
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-clear').classList.remove('visible');
+  document.getElementById('search-autocomplete').classList.remove('visible');
+  document.getElementById('search-history-dropdown').classList.remove('visible');
+  document.getElementById('search-results-view').classList.add('hidden');
+  searchResults = [];
+  activeSearchQuery = '';
+}
+
+async function doSearch(queryOverride) {
+  const query = queryOverride || document.getElementById('search-input').value.trim();
+  if (!query) return;
+
+  activeSearchQuery = query;
+  saveSearchHistory(query);
+
+  document.getElementById('search-clear').classList.add('visible');
+  document.getElementById('search-history-dropdown').classList.remove('visible');
+  document.getElementById('search-autocomplete').classList.remove('visible');
+
+  const view = document.getElementById('search-results-view');
+  view.classList.remove('hidden');
+  document.getElementById('search-results-tbody').innerHTML =
+    '<tr><td colspan="6"><div class="search-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div></td></tr>';
+  document.getElementById('search-results-title').textContent = '🔍 Searching…';
+  document.getElementById('search-results-count').textContent = '';
+
+  try {
+    const resp = await fetch('/api/search?q=' + encodeURIComponent(query));
+    const data = await resp.json();
+    searchResults = data.results || [];
+    document.getElementById('search-results-title').textContent =
+      `🔍 Search: "${query}"`;
+    document.getElementById('search-results-count').textContent =
+      `${data.total} results (showing ${searchResults.length})`;
+    renderSearchTypeFilters();
+    renderSearchResults();
+  } catch (e) {
+    document.getElementById('search-results-tbody').innerHTML =
+      '<tr><td colspan="6"><div class="search-empty"><span class="search-empty-icon">⚠️</span>Search failed</div></td></tr>';
+  }
+}
+
+function renderSearchTypeFilters() {
+  const container = document.getElementById('search-type-filters');
+  if (searchResults.length === 0) { container.innerHTML = ''; return; }
+
+  const types = ['all', 'alert', 'auth', 'fim', 'beaconing', 'dns', 'process', 'network'];
+  const typeLabels = { all: 'All', alert: 'Alerts', auth: 'Auth', fim: 'FIM', beaconing: 'Beaconing', dns: 'DNS', process: 'Processes', network: 'Network' };
+  const typeIcons = { all: '', alert: '🚨', auth: '🔑', fim: '📁', beaconing: '📡', dns: '🌐', process: '⚙️', network: '🔗' };
+
+  let html = '';
+  types.forEach(t => {
+    const count = t === 'all' ? searchResults.length : searchResults.filter(r => r.type === t).length;
+    if (t !== 'all' && count === 0) return;
+    const active = searchTypeFilter === t ? ' active' : '';
+    html += `<button class="search-type-tab${active}" onclick="filterSearchByType('${t}')">
+      ${typeIcons[t]} ${typeLabels[t]}<span class="search-type-count">${count}</span>
+    </button>`;
+  });
+  container.innerHTML = html;
+}
+
+function filterSearchByType(type) {
+  searchTypeFilter = type;
+  renderSearchTypeFilters();
+  renderSearchResults();
+}
+
+function sortSearchResults(col) {
+  if (searchSortCol === col) {
+    searchSortDir *= -1;
+  } else {
+    searchSortCol = col;
+    searchSortDir = col === 'timestamp' ? -1 : 1;  // default: timestamp desc, others asc
+  }
+  renderSearchResults();
+}
+
+const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+
+function renderSearchResults() {
+  const tbody = document.getElementById('search-results-tbody');
+
+  // Filter by type
+  let results = searchResults;
+  if (searchTypeFilter !== 'all') {
+    results = results.filter(r => r.type === searchTypeFilter);
+  }
+
+  // Sort
+  results = [...results].sort((a, b) => {
+    let valA, valB;
+    switch (searchSortCol) {
+      case 'type':
+        valA = (a.type || '').toLowerCase();
+        valB = (b.type || '').toLowerCase();
+        break;
+      case 'timestamp':
+        valA = a.timestamp || '';
+        valB = b.timestamp || '';
+        break;
+      case 'severity':
+        valA = SEVERITY_ORDER[a.severity] ?? 9;
+        valB = SEVERITY_ORDER[b.severity] ?? 9;
+        break;
+      case 'host':
+        valA = (a.host || '').toLowerCase();
+        valB = (b.host || '').toLowerCase();
+        break;
+      case 'title':
+        valA = (a.title || '').toLowerCase();
+        valB = (b.title || '').toLowerCase();
+        break;
+      default:
+        valA = a[searchSortCol] || '';
+        valB = b[searchSortCol] || '';
+    }
+    if (valA < valB) return -1 * searchSortDir;
+    if (valA > valB) return 1 * searchSortDir;
+    return 0;
+  });
+
+  // Update sort headers
+  document.querySelectorAll('.search-results-table th').forEach(th => {
+    th.classList.remove('sorted');
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = '';
+  });
+  const thEl = document.getElementById('search-th-' + searchSortCol);
+  if (thEl) {
+    thEl.classList.add('sorted');
+    const arrow = thEl.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = searchSortDir === 1 ? ' ▲' : ' ▼';
+  }
+
+  if (!results.length) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="search-empty"><span class="search-empty-icon">📭</span>No results</div></td></tr>';
+    return;
+  }
+
+  let html = '';
+  results.forEach((r, i) => {
+    const badgeClass = 'badge-' + (r.severity || 'low');
+    const typeLabel = (r.icon || '') + ' ' + (r.type || '?');
+    const ts = formatTimestamp(r.timestamp);
+    const rowId = 'search-row-' + i;
+
+    html += `<tr id="${rowId}" onclick="toggleSearchRowDetail('${rowId}', ${i})">
+      <td><span class="search-result-type">${escHtml(typeLabel)}</span></td>
+      <td><span class="search-result-timestamp" title="${escHtml(r.timestamp)}">${escHtml(ts)}</span></td>
+      <td><span class="search-result-severity ${badgeClass}">${escHtml(r.severity || '?')}</span></td>
+      <td><span class="search-result-host">${escHtml(r.host || '—')}</span></td>
+      <td>
+        <span class="search-result-title" title="${escHtml(r.title || '')}">${escHtml(r.title || '—')}</span>
+      </td>
+      <td class="search-result-actions">
+        <button class="search-result-expand" onclick="event.stopPropagation();toggleSearchRowDetail('${rowId}', ${i})" title="Details">⛶</button>
+      </td>
+    </tr>
+    <tr id="${rowId}-detail" style="display:none">
+      <td colspan="6">
+        <div class="search-result-detail" id="${rowId}-detail-content">
+          ${renderSearchDetail(r)}
+        </div>
+      </td>
+    </tr>`;
+  });
+  tbody.innerHTML = html;
+}
+
+function renderSearchDetail(r) {
+  let metaHtml = '';
+  if (r.metadata && Object.keys(r.metadata).length > 0) {
+    metaHtml = '<div class="search-result-detail-grid">';
+    for (const [k, v] of Object.entries(r.metadata)) {
+      if (v === null || v === undefined || v === '') continue;
+      if (typeof v === 'object') continue;
+      const label = k.replace(/_/g, ' ');
+      metaHtml += `<div class="search-result-detail-item"><span class="k">${escHtml(label)}</span><span class="v">${escHtml(String(v))}</span></div>`;
+    }
+    metaHtml += '</div>';
+  }
+
+  let descHtml = '';
+  if (r.description) {
+    descHtml = `<div class="search-result-desc">${escHtml(r.description)}</div>`;
+  }
+
+  return metaHtml + descHtml;
+}
+
+function toggleSearchRowDetail(rowId, idx) {
+  const detailRow = document.getElementById(rowId + '-detail');
+  const mainRow = document.getElementById(rowId);
+  if (!detailRow) return;
+
+  if (detailRow.style.display === 'none') {
+    detailRow.style.display = '';
+    mainRow.classList.add('expanded');
+  } else {
+    detailRow.style.display = 'none';
+    mainRow.classList.remove('expanded');
+  }
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString('en-US', {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+  } catch (e) {
+    return ts;
+  }
+}
+
 function relativeTime(ts) {
   if (!ts) return '—';
   const now = Date.now() / 1000;
@@ -3069,7 +3690,7 @@ function renderAlertsError(msg) {
 
 function escHtml(s) {
   if (!s) return '';
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 async function acknowledgeAlert(id, el) {

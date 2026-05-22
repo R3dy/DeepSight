@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """System Dashboard Server — multi-host collector for DeepSight."""
 
-import json
 import os
 import glob
 import time
-import uuid
 import threading
 import psutil
-from datetime import datetime, timezone
 from flask import Flask, jsonify, send_from_directory, request, g
 
 import auth
@@ -32,9 +29,6 @@ _PROCESS_CACHE_TTL = 3  # seconds
 # ── Self-hostname ──
 SELF_HOST = os.uname().nodename
 
-
-def collect_local_stats():
-    """Collect stats from localhost — same shape agents report."""
 
 def compute_memory_stats(mem):
     """Compute memory stats with kernel reserved broken out separately."""
@@ -102,7 +96,7 @@ def collect_local_stats():
 
     ram_procs = []
     cpu_procs = []
-    for proc in psutil.process_iter(["pid", "name", "memory_info", "cpu_percent"]):
+    for proc in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
             info = proc.info
             rss = info["memory_info"].rss
@@ -132,7 +126,9 @@ def collect_local_stats():
         rest = procs[top_n:]
         if rest:
             total = sum(p[by_field] for p in rest)
-            total_pct = round(total / mem.total * 100, 2) if by_field == "memory" else round(total, 1)
+            total_pct = (
+                round(total / mem.total * 100, 2)
+                if by_field == "memory" else round(total, 1))
             top.append(
                 {
                     "pid": 0,
@@ -388,7 +384,8 @@ def collect_cpu_temp():
                 if os.path.exists(input_file):
                     label = _read_lines(label_file) if os.path.exists(label_file) else ""
                     temp = int(_read_lines(input_file)) / 1000.0
-                    if "core" in label.lower() or "tctl" in label.lower() or "package" in label.lower():
+                    if ("core" in label.lower() or "tctl" in label.lower()
+                            or "package" in label.lower()):
                         return {"label": label, "temp_c": round(temp, 1)}
             except Exception:
                 pass
@@ -407,8 +404,9 @@ def collect_cpu_temp():
 def collect_process_deep(top_n=5):
     """Get PSS/USS for top memory processes via smaps_rollup."""
     procs = []
-    for proc in psutil.process_iter(["pid", "name", "memory_info", "cpu_percent",
-                                       "cpu_times", "num_threads", "status", "username"]):
+    for proc in psutil.process_iter(["pid", "name", "memory_info",
+                                     "cpu_times", "num_threads",
+                                     "status", "username"]):
         try:
             info = proc.info
             rss = info["memory_info"].rss
@@ -547,7 +545,8 @@ def collect_gpu_deep():
             if not os.path.exists(vf):
                 continue
             gpu["usage"] = _read_int(os.path.join(card, "gpu_busy_percent"))
-            gpu["vram_used_gb"] = round(_read_int(os.path.join(card, "mem_info_vram_used")) / 1024**3, 1)
+            gpu["vram_used_gb"] = round(
+                _read_int(os.path.join(card, "mem_info_vram_used")) / 1024**3, 1)
             gpu["vram_total_gb"] = round(_read_int(vf) / 1024**3, 1)
 
             # Temp
@@ -562,7 +561,9 @@ def collect_gpu_deep():
                     lines = _read_lines(clk).strip().split("\n")
                     for line in lines:
                         if "*" in line:
-                            gpu["sclk_mhz"] = int(line.split(":")[1].strip().replace("Mhz","").replace("*","").strip() or 0)
+                            gpu["sclk_mhz"] = int(
+                                line.split(":")[1].strip()
+                                .replace("Mhz", "").replace("*", "").strip() or 0)
                 except Exception:
                     pass
             for clk in glob.glob(os.path.join(card, "pp_dpm_mclk")):
@@ -570,7 +571,9 @@ def collect_gpu_deep():
                     lines = _read_lines(clk).strip().split("\n")
                     for line in lines:
                         if "*" in line:
-                            gpu["mclk_mhz"] = int(line.split(":")[1].strip().replace("Mhz","").replace("*","").strip() or 0)
+                            gpu["mclk_mhz"] = int(
+                                line.split(":")[1].strip()
+                                .replace("Mhz", "").replace("*", "").strip() or 0)
                 except Exception:
                     pass
 
@@ -927,16 +930,25 @@ def collect_process_detail(pid):
                                     local_hex = parts[1]
                                     remote_hex = parts[2]
                                     state_hex = parts[3] if "tcp" in path else "07"
-                                    # Decode IP:port
-                                    lip = ".".join(str(int(local_hex[:8][i:i+2], 16)) for i in range(0, 8, 2))
-                                    # Actually use proper decoding
+                                    # Decode IP:port with proper hex parsing
                                     ip_int = int(local_hex.split(":")[0], 16)
-                                    lip2 = ".".join(str((ip_int >> (8*i)) & 0xFF) for i in range(3,-1,-1))
+                                    lip2 = ".".join(
+                                        str((ip_int >> (8 * i)) & 0xFF)
+                                        for i in range(3, -1, -1))
                                     lport = int(local_hex.split(":")[1], 16)
                                     rip_int = int(remote_hex.split(":")[0], 16)
-                                    rip2 = ".".join(str((rip_int >> (8*i)) & 0xFF) for i in range(3,-1,-1))
+                                    rip2 = ".".join(
+                                        str((rip_int >> (8 * i)) & 0xFF)
+                                        for i in range(3, -1, -1))
                                     rport = int(remote_hex.split(":")[1], 16)
-                                    smap = {"01":"ESTABLISHED","02":"SYN_SENT","03":"SYN_RECV","04":"FIN_WAIT1","05":"FIN_WAIT2","06":"TIME_WAIT","07":"CLOSE","08":"CLOSE_WAIT","09":"LAST_ACK","0A":"LISTEN","0B":"CLOSING"}
+                                    smap = {
+                                        "01": "ESTABLISHED", "02": "SYN_SENT",
+                                        "03": "SYN_RECV", "04": "FIN_WAIT1",
+                                        "05": "FIN_WAIT2", "06": "TIME_WAIT",
+                                        "07": "CLOSE", "08": "CLOSE_WAIT",
+                                        "09": "LAST_ACK", "0A": "LISTEN",
+                                        "0B": "CLOSING",
+                                    }
                                     state = smap.get(state_hex, state_hex)
                                     proc_conns.append({
                                         "proto": "tcp" if "tcp" in path else "udp",
@@ -983,7 +995,8 @@ def collect_users():
             try:
                 # Find the user's shell/foreground process
                 for proc in psutil.process_iter(["pid", "username", "name", "cmdline", "terminal"]):
-                    if proc.info.get("terminal") == u.terminal and proc.info.get("username") == u.name:
+                    if (proc.info.get("terminal") == u.terminal
+                            and proc.info.get("username") == u.name):
                         args = proc.info.get("cmdline") or []
                         proc_info = " ".join(args) if args else proc.info.get("name", "")
                         break
@@ -1076,8 +1089,10 @@ def collect_outbound_http():
                                 if "=" in e:
                                     k, v = e.split("=", 1)
                                     if k.strip() == "pid":
-                                        try: pid = int(v.strip())
-                                        except ValueError: pass
+                                        try:
+                                            pid = int(v.strip())
+                                        except ValueError:
+                                            pass
                                         break
                             break
                 except Exception:
@@ -1353,7 +1368,6 @@ def api_cluster():
 @auth.require_auth
 def api_process_detail(pid):
     """Deep forensic detail for a single process (cached)."""
-    global _PROCESS_CACHE
     now = time.time()
     cache_key = str(pid)
     if cache_key in _PROCESS_CACHE:
@@ -1389,7 +1403,7 @@ def api_users():
 @app.route("/install.sh")
 def install_script():
     """Serve the agent install script with embedded secret and collector URL."""
-    collector_url = f"https://your-server.your-tailnet.ts.net:8451"
+    collector_url = "https://your-server.your-tailnet.ts.net:8451"
     script = f"""#!/usr/bin/env bash
 # ── System Dashboard Agent Installer ──
 # Run: curl -sSL {collector_url}/install.sh | sudo bash
@@ -1644,6 +1658,33 @@ def api_threat_intel():
         return jsonify({"error": "threat intel module not available"}), 503
 
 
+@app.route("/api/search")
+@auth.require_auth
+def api_search():
+    """
+    Advanced search across all event types, processes, and network connections.
+
+    Query syntax:
+      category:intrusion  severity:high  host:open-claw01  source:ssh
+      type:alert|auth|fim|beaconing|dns|process|network
+      after:2026-05-20  before:2026-05-22  limit:100
+
+    Returns: {results: [...], total: int, query_parsed: dict}
+    """
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({
+            "results": [], "total": 0, "query_parsed": {},
+            "hint": "Provide a search query with ?q=...",
+        })
+
+    results = detection.search_events(query)
+    return jsonify(results)
+
+
 # ═══════════════════════════════════════════
 # Authentication API Endpoints
 # ═══════════════════════════════════════════
@@ -1665,7 +1706,7 @@ def api_auth_login():
             username=username or None,
             ip_address=ip,
             user_agent=request.headers.get("User-Agent", ""),
-            details=f"Rate limit exceeded for login endpoint",
+            details="Rate limit exceeded for login endpoint",
         )
         return jsonify({
             "error": "rate_limited",
@@ -1673,7 +1714,10 @@ def api_auth_login():
         }), 429
 
     if not username or not password:
-        return jsonify({"error": "invalid_request", "reason": "Username and password required"}), 400
+        return jsonify({
+            "error": "invalid_request",
+            "reason": "Username and password required",
+        }), 400
 
     user = auth.verify_user(username, password)
     if not user:
