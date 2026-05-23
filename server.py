@@ -1712,6 +1712,63 @@ def api_search():
 
 
 # ═══════════════════════════════════════════
+# UEBA Anomaly Detection Endpoints
+# ═══════════════════════════════════════════
+
+@app.route("/api/anomalies")
+@auth.require_auth
+def api_anomalies():
+    """Return recent UEBA anomalies with optional host/metric filters."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    host = request.args.get("host")
+    limit = max(request.args.get("limit", 100, type=int), 1)
+    hours = max(request.args.get("hours", 24, type=int), 1)
+    engine = detection.get_baseline_engine()
+    anomalies = engine.get_anomalies(host=host, limit=limit, hours=hours)
+
+    # Build severity counts for summary badge
+    sev_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    for a in anomalies:
+        s = a.get("severity", "low")
+        if s in sev_counts:
+            sev_counts[s] += 1
+
+    return jsonify({
+        "anomalies": anomalies,
+        "count": len(anomalies),
+        "severity_counts": sev_counts,
+    })
+
+
+@app.route("/api/baselines")
+@auth.require_auth
+def api_baselines():
+    """Return current baseline state for all hosts/metrics."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    host = request.args.get("host")
+    engine = detection.get_baseline_engine()
+    baselines = engine.get_baselines(host=host)
+
+    # Count learning vs active
+    learning = sum(1 for b in baselines if b.get("is_learning"))
+    active = len(baselines) - learning
+
+    return jsonify({
+        "baselines": baselines,
+        "count": len(baselines),
+        "learning": learning,
+        "active": active,
+        "config": {
+            "window_seconds": detection.BASELINE_WINDOW_SECONDS,
+            "learning_samples": detection.BASELINE_LEARNING_SAMPLES,
+            "default_threshold": detection.BASELINE_Z_THRESHOLD,
+        },
+    })
+
+
+# ═══════════════════════════════════════════
 # Authentication API Endpoints
 # ═══════════════════════════════════════════
 
