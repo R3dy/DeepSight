@@ -17,7 +17,6 @@ import time
 import socket
 import threading
 import ipaddress
-from collections import defaultdict
 from datetime import datetime, timezone
 
 import requests
@@ -326,7 +325,7 @@ class _EnrichmentFunctions:
                 resp = requests.get(
                     "https://api.abuseipdb.org/api/v2/check",
                     headers={"Key": ABUSEIPDB_API_KEY, "Accept": "application/json"},
-                    params={"ipAddress": ip, "maxAgeInDays": 90, "verbose": ""},
+                    params={"ipAddress": ip, "maxAgeInDays": 90},
                     timeout=REQUEST_TIMEOUT,
                 )
                 if resp.status_code == 200:
@@ -397,18 +396,8 @@ class _EnrichmentFunctions:
         if not ips:
             return {"skipped": True, "reason": "No IPs to check"}
 
-        # Fetch Tor exit node list
-        tor_exits = set()
         try:
-            resp = requests.get(
-                "https://check.torproject.org/torbulkexitlist",
-                timeout=REQUEST_TIMEOUT,
-            )
-            if resp.status_code == 200:
-                for line in resp.text.strip().split("\n"):
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        tor_exits.add(line)
+            tor_exits = _get_tor_exits()
         except Exception:
             return {"error": "Failed to fetch Tor exit node list", "results": {}}
 
@@ -431,7 +420,7 @@ class _EnrichmentFunctions:
         for ip in ips[:5]:  # ip-api.com free tier limits
             try:
                 resp = requests.get(
-                    f"http://ip-api.com/json/{ip}",
+                    f"https://ip-api.com/json/{ip}",
                     params={"fields": "country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as"},
                     timeout=REQUEST_TIMEOUT,
                 )
@@ -512,30 +501,26 @@ class _EnrichmentFunctions:
         if not ips:
             return {"skipped": True, "reason": "No IPs to check"}
 
-        # Fetch Feodo blocklist
         try:
-            resp = requests.get(FEODO_API_URL, timeout=REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                return {"error": f"HTTP {resp.status_code} fetching Feodo blocklist"}
-
-            blocklist = resp.json()
-            # Feodo format: [{"ip_address": "x.x.x.x", "port": 443, "status": "online", ...}, ...]
-            blocked_ips = {}
-            for entry in blocklist:
-                ip = entry.get("ip_address", "")
-                if ip:
-                    blocked_ips[ip] = {
-                        "port": entry.get("port"),
-                        "status": entry.get("status", "unknown"),
-                        "hostname": entry.get("hostname"),
-                        "as_number": entry.get("as_number"),
-                        "country": entry.get("country"),
-                        "first_seen": entry.get("first_seen"),
-                        "last_seen": entry.get("last_seen"),
-                        "malware": entry.get("malware", ""),
-                    }
+            blocklist = _get_feodo_blocklist()
         except Exception as e:
             return {"error": str(e)[:200]}
+
+        # Feodo format: [{"ip_address": "x.x.x.x", "port": 443, "status": "online", ...}, ...]
+        blocked_ips = {}
+        for entry in blocklist:
+            ip = entry.get("ip_address", "")
+            if ip:
+                blocked_ips[ip] = {
+                    "port": entry.get("port"),
+                    "status": entry.get("status", "unknown"),
+                    "hostname": entry.get("hostname"),
+                    "as_number": entry.get("as_number"),
+                    "country": entry.get("country"),
+                    "first_seen": entry.get("first_seen"),
+                    "last_seen": entry.get("last_seen"),
+                    "malware": entry.get("malware", ""),
+                }
 
         results = {}
         for ip in ips:
@@ -551,7 +536,12 @@ class _EnrichmentFunctions:
 
     @staticmethod
     def whois_check(context):
-        """Basic whois lookup using socket connections (port 43)."""
+        """Whois lookup with referral following (IANA root → TLD whois server).
+
+        1. Query whois.iana.org first (the IANA root)
+        2. Parse the `refer:` line from the response
+        3. Reconnect to the referred TLD whois server for authoritative data
+        """
         domains = context.get("domains", []) + context.get("ips", [])[:1]
         if not domains:
             return {"skipped": True, "reason": "No domains to check"}
@@ -559,6 +549,7 @@ class _EnrichmentFunctions:
         results = {}
         for target in domains[:3]:
             try:
+                # Step 1: Query IANA root
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(REQUEST_TIMEOUT)
                 s.connect(("whois.iana.org", 43))
@@ -572,7 +563,27 @@ class _EnrichmentFunctions:
                 s.close()
                 response = raw.decode("utf-8", errors="replace")
 
-                # Parse key fields from whois response
+                # Step 2: Check for referral to TLD whois server
+                refer_match = re.search(r"(?i)^refer:\s*(\S+)", response, re.MULTILINE)
+                if refer_match:
+                    refer_server = refer_match.group(1).strip()
+                    try:
+                        s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s2.settimeout(REQUEST_TIMEOUT)
+                        s2.connect((refer_server, 43))
+                        s2.send(f"{target}\r\n".encode())
+                        raw2 = b""
+                        while True:
+                            chunk2 = s2.recv(4096)
+                            if not chunk2:
+                                break
+                            raw2 += chunk2
+                        s2.close()
+                        response = raw2.decode("utf-8", errors="replace")
+                    except Exception:
+                        # If referral fails, use the IANA response as-is
+                        pass
+
                 parsed = _parse_whois(response)
                 results[target] = parsed
             except socket.timeout:
@@ -708,6 +719,84 @@ def _parse_whois(raw):
         fields["refer"] = refer_match.group(1).strip()
 
     return fields
+
+
+# ═══════════════════════════════════════════
+# TTL-Cached Blocklist Fetching
+# ═══════════════════════════════════════════
+
+_tor_cache = None
+_tor_cache_ts = 0
+_TOR_CACHE_TTL = 3600  # 1 hour
+
+
+def _get_tor_exits():
+    """Fetch Tor exit node list with TTL cache (module-level)."""
+    global _tor_cache, _tor_cache_ts
+    now = time.time()
+    if _tor_cache is not None and (now - _tor_cache_ts) < _TOR_CACHE_TTL:
+        return _tor_cache
+    tor_exits = set()
+    try:
+        resp = requests.get(
+            "https://check.torproject.org/torbulkexitlist",
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            for line in resp.text.strip().split("\n"):
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    tor_exits.add(line)
+    except Exception:
+        if _tor_cache is not None:
+            return _tor_cache
+        raise
+    _tor_cache = tor_exits
+    _tor_cache_ts = now
+    return tor_exits
+
+
+def clear_tor_cache():
+    """Clear the Tor exit node cache (useful for testing)."""
+    global _tor_cache, _tor_cache_ts
+    _tor_cache = None
+    _tor_cache_ts = 0
+
+
+_feodo_cache = None
+_feodo_cache_ts = 0
+_FEODO_CACHE_TTL = 900  # 15 minutes
+
+
+def _get_feodo_blocklist():
+    """Fetch Feodo blocklist with TTL cache (module-level)."""
+    global _feodo_cache, _feodo_cache_ts
+    now = time.time()
+    if _feodo_cache is not None and (now - _feodo_cache_ts) < _FEODO_CACHE_TTL:
+        return _feodo_cache
+    blocklist = None
+    try:
+        resp = requests.get(FEODO_API_URL, timeout=REQUEST_TIMEOUT)
+        if resp.status_code == 200:
+            blocklist = resp.json()
+    except Exception:
+        if _feodo_cache is not None:
+            return _feodo_cache
+        raise
+    if blocklist is None:
+        if _feodo_cache is not None:
+            return _feodo_cache
+        raise RuntimeError("Failed to fetch Feodo blocklist")
+    _feodo_cache = blocklist
+    _feodo_cache_ts = now
+    return blocklist
+
+
+def clear_feodo_cache():
+    """Clear the Feodo blocklist cache (useful for testing)."""
+    global _feodo_cache, _feodo_cache_ts
+    _feodo_cache = None
+    _feodo_cache_ts = 0
 
 
 # ═══════════════════════════════════════════
@@ -985,7 +1074,9 @@ def _append_enrichment_to_alert(alert_id, enrichment_data):
         conn.commit()
         _log(f"Alert {alert_id}: enrichment appended to database")
     except Exception as e:
+        import traceback
         _log(f"Alert {alert_id}: failed to append enrichment to DB: {e}")
+        _log(f"Traceback:\n{traceback.format_exc()}")
 
 
 # ═══════════════════════════════════════════

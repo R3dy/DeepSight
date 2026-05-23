@@ -10,7 +10,7 @@ Routes:
 
 import json
 
-from flask import jsonify, request, g
+from flask import jsonify, request
 
 from routes.v2 import v2_bp, auth, log_api_audit, require_permission
 
