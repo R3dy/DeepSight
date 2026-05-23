@@ -7,13 +7,11 @@ Covers:
   - Integration with alert pipeline
 """
 
-import json
 import sys
 import os
 import time
 import socket
-import threading
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -24,6 +22,7 @@ from playbook_engine import (
     _build_enrichment_context, _parse_whois, _is_valid_ip,
     get_playbook_engine,
     _EnrichmentFunctions,
+    clear_tor_cache, clear_feodo_cache,
 )
 
 
@@ -34,8 +33,6 @@ from playbook_engine import (
 @pytest.fixture
 def engine():
     """Create a fresh PlaybookEngine for testing."""
-    # Import inside to trigger reinit with fresh state
-    import playbook_engine
     engine = PlaybookEngine()
     return engine
 
@@ -808,6 +805,7 @@ class TestTorExitCheckMocked:
 
     @patch("playbook_engine.requests.get")
     def test_tor_exit_detected(self, mock_get):
+        clear_tor_cache()  # ensure no cached data from other tests
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = "# Tor exit list\n203.0.113.42\n198.51.100.77\n"
@@ -821,6 +819,7 @@ class TestTorExitCheckMocked:
 
     @patch("playbook_engine.requests.get")
     def test_tor_check_failure(self, mock_get):
+        clear_tor_cache()  # ensure no cached data from other tests
         mock_get.side_effect = Exception("Network error")
 
         funcs = _EnrichmentFunctions()
@@ -843,6 +842,7 @@ class TestFeodoCheckMocked:
 
     @patch("playbook_engine.requests.get")
     def test_feodo_c2_detected(self, mock_get):
+        clear_feodo_cache()  # ensure no cached data from other tests
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = [
@@ -869,6 +869,7 @@ class TestFeodoCheckMocked:
 
     @patch("playbook_engine.requests.get")
     def test_feodo_fetch_error(self, mock_get):
+        clear_feodo_cache()  # ensure no cached data from other tests
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_get.return_value = mock_resp
