@@ -9,14 +9,13 @@ Extends the original BaselineEngine with:
 - UEBA anomaly management (acknowledge, promote, false positive)
 """
 
-import os
 import re
 import time
 import math
-import json
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
+
 
 # ── Shared _log helper ──
 def _log(msg):
@@ -1368,7 +1367,7 @@ class RiskScorer:
                 "direction": direction,
                 "current_level": current["risk_level"],
                 "history": [{"timestamp": h["timestamp"], "score": h["new_score"]}
-                           for h in history[-48:]],  # last 48 points
+                            for h in history[-48:]],  # last 48 points
             }
         except Exception as e:
             _log(f"get_risk_trend error: {e}")

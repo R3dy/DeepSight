@@ -47,10 +47,13 @@ try:
     HAS_SIGMA = True
 except ImportError:
     HAS_SIGMA = False
+
     def evaluate_sigma(event):
         return []
+
     def get_sigma_engine():
         return None
+
     def _update_collector_health(*args, **kwargs):
         pass
 
@@ -1510,7 +1513,6 @@ def set_socketio(sio):
 
 def _emit_alert_socketio(alert_dict):
     """Emit a new_alert event via SocketIO if available."""
-    global _socketio
     if _socketio is None:
         return
     try:
@@ -4951,12 +4953,6 @@ class AlertGrouper:
             severity = alert.get("severity", "medium")
 
             # Count alerts in incident
-            count_row = self.db.execute(
-                "SELECT COUNT(*) as cnt FROM incident_alerts WHERE incident_id = ?",
-                (incident_id,),
-            ).fetchone()
-            count = count_row["cnt"] if count_row else 0
-
             # Escalate incident severity if alert severity is higher
             sev_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
             existing = self.db.execute(

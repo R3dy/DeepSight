@@ -11,12 +11,10 @@ Sigma format reference: https://github.com/SigmaHQ/sigma
 
 import os
 import re
-import json
 import glob
-import time
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import yaml
@@ -27,6 +25,8 @@ DB_PATH = os.path.join(DATA_DIR, "alerts.db")
 SIGMA_RULES_DIR = os.path.join(DATA_DIR, "sigma_rules")
 
 # ── Log function ──
+
+
 def _log(msg: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[sigma-engine {ts}] {msg}", flush=True)
@@ -203,7 +203,7 @@ def _parse_condition_expr(event: dict, detection: dict, expr: str) -> bool:
     if expr.startswith("(") and expr.endswith(")"):
         return _parse_condition_expr(event, detection, expr[1:-1].strip())
 
-    # Handle 'not <expr>' 
+    # Handle 'not <expr>'
     if expr.lower().startswith("not "):
         sub = expr[4:].strip()
         return not _parse_condition_expr(event, detection, sub)
@@ -314,7 +314,7 @@ def _normalize_sigma_event(event: dict, rule_logsource: dict) -> dict:
 
     # Determine event category from logsource
     category = rule_logsource.get("category", "")
-    product = rule_logsource.get("product", "")
+    product = rule_logsource.get("product", "")  # noqa: F841
 
     # Add ECS field aliases
     field_map = {}
@@ -392,7 +392,7 @@ class SigmaRule:
         logsource_cat = self.logsource.get("category", "")
         event_type = event.get("event_type", "")
 
-        # Logsource filtering — accept both Sigma-standard and our internal event types
+        # Logsource filtering - accept both Sigma-standard and our internal event types
         if logsource_cat and event_type:
             if logsource_cat == "process_creation" and event_type not in (
                 "sigma_process_event", "process_creation", "process", "process_audit",
@@ -428,7 +428,7 @@ class SigmaRule:
             return None
 
         matched = _evaluate_condition(norm_event, self.detection, "")
-        
+
         if matched:
             return [{
                 "title": self.title,
@@ -489,8 +489,9 @@ class SigmaEngine:
             return
 
         count = 0
-        for yaml_file in sorted(glob.glob(os.path.join(self.rules_dir, "*.yml"))) + \
-                         sorted(glob.glob(os.path.join(self.rules_dir, "*.yaml"))):
+        patterns = sorted(glob.glob(os.path.join(self.rules_dir, "*.yml"))) \
+            + sorted(glob.glob(os.path.join(self.rules_dir, "*.yaml")))
+        for yaml_file in patterns:
             try:
                 with open(yaml_file) as f:
                     data = yaml.safe_load(f)
