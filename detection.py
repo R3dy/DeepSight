@@ -247,6 +247,7 @@ def _create_tables(conn):
 
     # ── Schema migrations for new columns ──
     _migrate_beaconing_schema(conn)
+    _migrate_correlation_schema(conn)
     conn.commit()
 
 
@@ -264,6 +265,29 @@ def _migrate_beaconing_schema(conn):
     for col_name, col_def in new_cols:
         if col_name not in existing:
             conn.execute(f"ALTER TABLE beaconing_events ADD COLUMN {col_name} {col_def}")
+
+
+def _migrate_correlation_schema(conn):
+    """Create correlation_matches table if it doesn't exist (safe migration)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS correlation_matches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_id TEXT NOT NULL,
+            chain_name TEXT NOT NULL,
+            host TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            steps_json TEXT DEFAULT '[]',
+            severity TEXT NOT NULL DEFAULT 'high'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_correlation_timestamp
+            ON correlation_matches(completed_at);
+        CREATE INDEX IF NOT EXISTS idx_correlation_host
+            ON correlation_matches(host);
+        CREATE INDEX IF NOT EXISTS idx_correlation_chain
+            ON correlation_matches(chain_id);
+    """)
 
 
 def _create_fts_triggers(conn):
@@ -1013,6 +1037,15 @@ def _is_duplicate(category, source_ip, title, now_epoch=None):
         return False
 
 
+def _correlate_alert(alert_dict):
+    """Feed a newly created alert into the correlation engine if available."""
+    try:
+        engine = get_correlation_engine()
+        engine.process_alert(alert_dict)
+    except Exception:
+        pass  # correlation is best-effort, don't break alert creation
+
+
 def create_alert(severity, category, title, description="", source_host="",
                  source_ip="", mitre_tactic="", mitre_technique="",
                  process_pid=None, process_name="", raw_data=None):
@@ -1047,6 +1080,8 @@ def create_alert(severity, category, title, description="", source_host="",
         }
         # Dispatch notification (non-blocking background thread)
         _dispatch_notification(alert_dict)
+        # Feed to correlation engine (non-blocking, thread-safe)
+        _correlate_alert(alert_dict)
         return alert_dict
     except Exception as e:
         _log(f"Error creating alert: {e}")
@@ -3196,6 +3231,339 @@ def get_baseline_engine():
     return _baseline_engine
 
 
+# ═══════════════════════════════════════════
+# Real-Time Event Correlation Engine
+# ═══════════════════════════════════════════
+
+# ── Chain pattern definitions ──
+CHAIN_PATTERNS = [
+    {
+        "id": "portscan_sshbrute",
+        "name": "Port Scan → SSH Brute Force",
+        "severity": "critical",
+        "description": "Port scan followed by SSH brute force from same IP within 5 minutes",
+        "steps": [
+            {"category": "port_scan", "min_count": 1, "max_gap_seconds": 300},
+            {"category": "brute_force", "min_count": 1, "max_gap_seconds": 300},
+        ],
+    },
+    {
+        "id": "auth_spike_login_newip",
+        "name": "Failed Auth Spike → Successful Login from New IP",
+        "severity": "high",
+        "description": "Spike in failed authentications followed by successful login from a new IP within 3 minutes",
+        "steps": [
+            {"category": "auth_failure", "min_count": 3, "max_gap_seconds": 180},
+            {"category": "auth_success", "min_count": 1, "max_gap_seconds": 180},
+        ],
+    },
+    {
+        "id": "dga_beaconing",
+        "name": "DNS DGA → Beaconing Detection",
+        "severity": "critical",
+        "description": "DGA-like DNS activity followed by C2 beaconing detection within 10 minutes",
+        "steps": [
+            {"category": "dga", "min_count": 2, "max_gap_seconds": 600},
+            {"category": "beaconing", "min_count": 1, "max_gap_seconds": 600},
+        ],
+    },
+    {
+        "id": "fim_process_outbound",
+        "name": "File Integrity → New Process → Outbound Connection",
+        "severity": "high",
+        "description": "File integrity alert followed by new process spawning an outbound connection within 2 minutes",
+        "steps": [
+            {"category": "file_integrity", "min_count": 1, "max_gap_seconds": 120},
+            {"category": "new_process", "min_count": 1, "max_gap_seconds": 120},
+            {"category": "outbound_connection", "min_count": 1, "max_gap_seconds": 120},
+        ],
+    },
+    {
+        "id": "threatintel_alertspike",
+        "name": "Threat Intel Hit → Alert Spike",
+        "severity": "high",
+        "description": "Threat intel match followed by a spike in security alerts within 1 minute",
+        "steps": [
+            {"category": "threat_intel", "min_count": 1, "max_gap_seconds": 60},
+            {"category": "alert", "min_count": 3, "max_gap_seconds": 60},
+        ],
+    },
+]
+
+EXPIRY_INTERVAL_SECONDS = 60  # how often stale pending matches are cleaned
+
+
+class CorrelationEngine:
+    """Real-time event correlation engine.
+
+    Detects multi-stage attack chains by matching sequences of individual alerts
+    against predefined CHAIN_PATTERNS. Tracks partial matches per (host, chain_id)
+    and creates correlation alerts when all steps are satisfied.
+    """
+
+    def __init__(self, db_conn):
+        self.db = db_conn
+        self.patterns = CHAIN_PATTERNS
+        # _pending: {(host, chain_id): {step_index, started_at, last_match_at, step_counts}}
+        self._pending = {}
+        self._pending_lock = threading.Lock()
+        self._expiry_thread = None
+        self._running = False
+
+    def start(self):
+        """Start the background expiry thread if not already running."""
+        if self._running:
+            return
+        self._running = True
+        self._expiry_thread = threading.Thread(
+            target=self._expire_loop, name="correlation-expiry", daemon=True
+        )
+        self._expiry_thread.start()
+        _log("CorrelationEngine started (expiry thread running)")
+
+    def stop(self):
+        """Signal the expiry thread to stop."""
+        self._running = False
+
+    def process_alert(self, alert):
+        """Called after an alert is created. Tracks partial chain matches.
+
+        Parameters:
+            alert: dict with keys id, severity, category, title, source_host,
+                   source_ip, timestamp, etc.
+        """
+        if not alert:
+            return
+
+        host = alert.get("source_host", "") or alert.get("source_ip", "")
+        if not host:
+            return
+
+        category = alert.get("category", "")
+        now = time.time()
+
+        with self._pending_lock:
+            for pattern in self.patterns:
+                chain_id = pattern["id"]
+                key = (host, chain_id)
+
+                # ── Check for existing partial match ──
+                if key in self._pending:
+                    p = self._pending[key]
+                    needed_step = pattern["steps"][p["step_index"]]
+
+                    if needed_step["category"] == category:
+                        p["step_counts"][category] = p["step_counts"].get(category, 0) + 1
+                        p["last_match_at"] = now
+
+                        if p["step_counts"][category] >= needed_step["min_count"]:
+                            p["step_index"] += 1
+
+                        if p["step_index"] >= len(pattern["steps"]):
+                            self._check_completion(key, pattern, p)
+                        return
+                    else:
+                        # Wrong step — check if we're still within gap for current step
+                        current_step = pattern["steps"][p["step_index"]]
+                        time_since_last = now - p["last_match_at"]
+                        if time_since_last > current_step["max_gap_seconds"]:
+                            # Expired — start fresh
+                            del self._pending[key]
+                        else:
+                            # Still waiting for current step — no match on this category
+                            continue
+
+                # ── Check if this alert starts a new chain ──
+                if pattern["steps"][0]["category"] == category:
+                    self._pending[key] = {
+                        "step_index": 0,
+                        "started_at": now,
+                        "last_match_at": now,
+                        "step_counts": {category: 1},
+                    }
+                    first_step = pattern["steps"][0]
+                    if first_step["min_count"] <= 1:
+                        self._pending[key]["step_index"] = 1
+                        if self._pending[key]["step_index"] >= len(pattern["steps"]):
+                            self._check_completion(key, pattern, self._pending[key])
+
+    def _check_completion(self, key, pattern, pending):
+        """All steps matched — persist the chain and create a correlation alert."""
+        host, chain_id = key
+        completed_at = time.time()
+        started_at = pending["started_at"]
+
+        # Persist to DB
+        steps_json = json.dumps(list(pending["step_counts"].items()))
+        try:
+            started_ts = datetime.fromtimestamp(started_at, timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            completed_ts = datetime.fromtimestamp(completed_at, timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            self.db.execute(
+                """INSERT INTO correlation_matches
+                   (chain_id, chain_name, host, started_at, completed_at,
+                    steps_json, severity)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    chain_id,
+                    pattern["name"],
+                    host,
+                    started_ts,
+                    completed_ts,
+                    steps_json,
+                    pattern["severity"],
+                ),
+            )
+            self.db.commit()
+            _log(
+                f"🔗 CORRELATION MATCH [{pattern['severity'].upper()}] "
+                f"{pattern['name']} on {host}"
+            )
+        except Exception as e:
+            _log(f"CorrelationEngine _check_completion DB error: {e}")
+
+        # Create a correlation alert
+        create_alert(
+            severity=pattern["severity"],
+            category="correlation",
+            title=f"Attack Chain: {pattern['name']}",
+            description=pattern.get("description", ""),
+            source_host=host,
+            mitre_tactic="Command and Control",
+            mitre_technique="T1071 (Application Layer Protocol)",
+            raw_data={
+                "chain_id": chain_id,
+                "host": host,
+                "started_at": started_ts,
+                "completed_at": completed_ts,
+                "steps": pending["step_counts"],
+            },
+        )
+
+        # Clear pending
+        del self._pending[key]
+
+    def _expire_pending(self):
+        """Remove stale partial matches whose last step gap has expired."""
+        now = time.time()
+        with self._pending_lock:
+            expired = []
+            for key, p in self._pending.items():
+                _, chain_id = key
+                # Find the pattern
+                pattern = next(
+                    (pat for pat in self.patterns if pat["id"] == chain_id), None
+                )
+                if pattern is None:
+                    expired.append(key)
+                    continue
+                current_step_idx = p["step_index"]
+                if current_step_idx < len(pattern["steps"]):
+                    gap = pattern["steps"][current_step_idx]["max_gap_seconds"]
+                    if now - p["last_match_at"] > gap:
+                        expired.append(key)
+            for key in expired:
+                del self._pending[key]
+
+    def _expire_loop(self):
+        """Background thread: periodically expire stale partial matches."""
+        while self._running:
+            try:
+                self._expire_pending()
+            except Exception as e:
+                _log(f"CorrelationEngine expiry error: {e}")
+            time.sleep(EXPIRY_INTERVAL_SECONDS)
+
+    def get_active_chains(self, host=None):
+        """Return list of in-progress chain matches.
+
+        Parameters:
+            host: optional filter by host
+
+        Returns:
+            list of dicts with chain_id, chain_name, host, started_at,
+            step_index, total_steps, last_match_at, step_counts
+        """
+        now = time.time()
+        with self._pending_lock:
+            result = []
+            for (h, chain_id), p in self._pending.items():
+                if host and h != host:
+                    continue
+                pattern = next(
+                    (pat for pat in self.patterns if pat["id"] == chain_id), None
+                )
+                if pattern is None:
+                    continue
+                result.append(
+                    {
+                        "chain_id": chain_id,
+                        "chain_name": pattern["name"],
+                        "host": h,
+                        "started_at": datetime.fromtimestamp(
+                            p["started_at"], timezone.utc
+                        ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "step_index": p["step_index"],
+                        "total_steps": len(pattern["steps"]),
+                        "step_names": [
+                            s["category"] for s in pattern["steps"]
+                        ],
+                        "step_counts": p["step_counts"],
+                        "last_match_at": p["last_match_at"],
+                        "severity": pattern["severity"],
+                        "age_seconds": round(now - p["started_at"], 1),
+                    }
+                )
+            return result
+
+    def get_completed_chains(self, host=None, limit=50):
+        """Return recently completed chain matches from the database.
+
+        Parameters:
+            host: optional filter by host
+            limit: max results
+
+        Returns:
+            list of dicts
+        """
+        try:
+            if host:
+                rows = self.db.execute(
+                    """SELECT * FROM correlation_matches
+                       WHERE host = ?
+                       ORDER BY completed_at DESC LIMIT ?""",
+                    (host, limit),
+                )
+            else:
+                rows = self.db.execute(
+                    """SELECT * FROM correlation_matches
+                       ORDER BY completed_at DESC LIMIT ?""",
+                    (limit,),
+                )
+            return [dict(r) for r in rows]
+        except Exception as e:
+            _log(f"CorrelationEngine get_completed_chains error: {e}")
+            return []
+
+
+_correlation_engine = None
+_correlation_lock = threading.Lock()
+
+
+def get_correlation_engine():
+    """Return the singleton CorrelationEngine, creating it if needed."""
+    global _correlation_engine
+    if _correlation_engine is None:
+        with _correlation_lock:
+            if _correlation_engine is None:
+                _correlation_engine = CorrelationEngine(get_db())
+                _log("CorrelationEngine initialized")
+    return _correlation_engine
+
+
 def _collect_local_metrics():
     """Collect baseline metrics from the local host."""
     metrics = {}
@@ -3352,6 +3720,10 @@ def start_collectors():
     # Initialize baseline engine early (creates tables)
     get_baseline_engine()
 
+    # Initialize and start correlation engine
+    correl = get_correlation_engine()
+    correl.start()
+
     collectors = [
         ("process_audit", process_audit_collector),
         ("beaconing", beaconing_collector),
@@ -3377,6 +3749,11 @@ def stop_collectors():
     if HAS_SYSLOG:
         try:
             syslog_ingest.stop_server()
+        except Exception:
+            pass
+    if _correlation_engine is not None:
+        try:
+            _correlation_engine.stop()
         except Exception:
             pass
     _log("Collectors stopping (daemon threads will exit)")
