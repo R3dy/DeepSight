@@ -11,3 +11,4 @@ node_modules/
 *.log
 docs/.vitepress/dist/
 data/syslog.db
+data/isolation_forest_model.pkl

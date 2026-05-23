@@ -222,6 +222,7 @@ def v2_health():
 # ── Import sub-route modules to register them on the blueprint ──
 import routes.v2.docs  # noqa: E402, F401 — registers /docs/ and /openapi.json routes
 import routes.v2.detection  # noqa: E402, F401 — registers /detection/ and /sigma/ routes
+import routes.v2.ueba  # noqa: E402, F401 — registers /ueba/ health and model-status routes
 
 
 def _ensure_audit_table_lazy():

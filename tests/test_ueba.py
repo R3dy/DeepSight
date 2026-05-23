@@ -1,8 +1,9 @@
-"""Tests for UEBA anomaly detection — BaselineEngine and collector."""
+"""Tests for UEBA anomaly detection — BaselineEngine, AnomalyDetector, and collector."""
 
 import sys
 import os
 import time
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -309,3 +310,349 @@ class TestBaselineAPI:
 
         anomalies = engine.get_anomalies()
         assert isinstance(anomalies, list)
+
+
+class TestAnomalyDetector:
+    """Test IsolationForest-based AnomalyDetector."""
+
+    # Use a temp path to avoid interference with saved models from other tests
+    _temp_model_path = "/tmp/test_isolation_forest_model.pkl"
+
+    def setup_method(self):
+        """Clean up temp model file before each test."""
+        if os.path.exists(self._temp_model_path):
+            os.unlink(self._temp_model_path)
+
+    def teardown_method(self):
+        """Clean up temp model file after each test."""
+        if os.path.exists(self._temp_model_path):
+            os.unlink(self._temp_model_path)
+
+    def test_import(self):
+        """AnomalyDetector is importable from detection module."""
+        import detection
+        assert hasattr(detection, 'AnomalyDetector'), (
+            "AnomalyDetector class should be importable")
+
+    def test_initialization(self):
+        """AnomalyDetector initializes with default parameters."""
+        import detection
+        detector = detection.AnomalyDetector(model_path=self._temp_model_path)
+        assert detector.model is None, "Model should be None before training"
+        assert detector.training_samples == 0
+        assert detector.is_trained is False
+        assert detector.status == "insufficient_data"  # 0 < 100 samples
+
+    def test_collect_and_train(self):
+        """AnomalyDetector collects samples and trains IsolationForest."""
+        import detection
+        import numpy as np
+
+        detector = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Feed normal samples
+        for i in range(60):
+            features = [
+                30.0 + (i % 5) * 0.5,   # cpu
+                8.0 + (i % 3) * 0.1,    # ram
+                10.0 + (i % 4) * 0.2,   # disk_read
+                5.0 + (i % 3) * 0.1,    # disk_write
+                50.0 + (i % 6) * 0.3,   # net_conns
+                200.0 + (i % 10) * 0.5,  # process_count
+            ]
+            detector.add_sample(features)
+
+        assert detector.training_samples == 60
+        assert detector.status == "ready"
+
+        # Train the model
+        detector.train()
+        assert detector.is_trained is True
+        assert detector.model is not None
+        assert hasattr(detector.model, 'predict')
+
+    def test_predict_normal(self):
+        """Normal samples score close to 1 (inlier)."""
+        import detection
+        import numpy as np
+
+        detector = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Feed 80 normal samples with slight noise
+        for i in range(80):
+            features = [
+                30.0 + (i % 5) * 0.5,
+                8.0 + (i % 3) * 0.1,
+                10.0 + (i % 4) * 0.2,
+                5.0 + (i % 3) * 0.1,
+                50.0 + (i % 6) * 0.3,
+                200.0 + (i % 10) * 0.5,
+            ]
+            detector.add_sample(features)
+
+        detector.train()
+
+        # Predict a normal sample
+        normal = [31.0, 8.2, 10.5, 5.1, 52.0, 202.0]
+        result = detector.predict(normal)
+        assert result is not None
+        assert "score" in result
+        assert "is_anomaly" in result
+        # Normal should NOT be an anomaly
+        assert result["is_anomaly"] is False, (
+            f"Normal sample incorrectly flagged as anomaly: {result}")
+
+    def test_predict_anomaly(self):
+        """Anomalous samples score close to -1 (outlier)."""
+        import detection
+        import numpy as np
+
+        detector = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Feed 80 normal samples
+        for i in range(80):
+            features = [
+                30.0 + (i % 5) * 0.5,
+                8.0 + (i % 3) * 0.1,
+                10.0 + (i % 4) * 0.2,
+                5.0 + (i % 3) * 0.1,
+                50.0 + (i % 6) * 0.3,
+                200.0 + (i % 10) * 0.5,
+            ]
+            detector.add_sample(features)
+
+        detector.train()
+
+        # Predict an anomalous sample (3x normal values)
+        anomalous = [90.0, 24.0, 50.0, 30.0, 200.0, 500.0]
+        result = detector.predict(anomalous)
+        assert result is not None
+        assert "score" in result
+        assert "is_anomaly" in result
+        # Anomaly should be flagged
+        assert result["is_anomaly"] is True, (
+            f"Anomalous sample not flagged: {result}")
+
+    def test_insufficient_data_status(self):
+        """Status is 'insufficient_data' when below min_samples."""
+        import detection
+
+        detector = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Feed only 10 samples
+        for i in range(10):
+            features = [30.0, 8.0, 10.0, 5.0, 50.0, 200.0]
+            detector.add_sample(features)
+
+        status = detector.get_status()
+        assert status["status"] == "insufficient_data"
+        assert status["samples_collected"] == 10
+        assert status["samples_required"] == 30
+        assert status["is_trained"] is False
+
+    def test_model_persistence(self):
+        """Model can be saved and loaded from disk."""
+        import detection
+        import tempfile
+        import numpy as np
+
+        detector1 = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Train on normal data
+        for i in range(80):
+            features = [
+                30.0 + (i % 5) * 0.5,
+                8.0 + (i % 3) * 0.1,
+                10.0 + (i % 4) * 0.2,
+                5.0 + (i % 3) * 0.1,
+                50.0 + (i % 6) * 0.3,
+                200.0 + (i % 10) * 0.5,
+            ]
+            detector1.add_sample(features)
+
+        detector1.train()
+        assert detector1.is_trained
+
+        # Save model
+        save_path = self._temp_model_path
+        detector1.save(save_path)
+        assert os.path.exists(save_path), f"Model file should exist at {save_path}"
+
+        # Load into new detector (use a different temp path to not auto-load)
+        load_path = "/tmp/test_load_isolation_forest.pkl"
+        detector1.save(load_path)
+        try:
+            detector2 = detection.AnomalyDetector(model_path="/tmp/nonexistent.pkl")
+            detector2.load(load_path)
+            assert detector2.is_trained is True
+            assert detector2.model is not None
+
+            # Both detectors should give same prediction
+            test_sample = [31.0, 8.2, 10.5, 5.1, 52.0, 202.0]
+            r1 = detector1.predict(test_sample)
+            r2 = detector2.predict(test_sample)
+            assert r1["is_anomaly"] == r2["is_anomaly"], (
+                "Loaded model should produce same predictions")
+        finally:
+            if os.path.exists(load_path):
+                os.unlink(load_path)
+
+    def test_model_health_metrics(self):
+        """get_health returns expected health metrics structure."""
+        import detection
+
+        detector = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Feed samples and train
+        for i in range(80):
+            features = [
+                30.0 + (i % 5) * 0.5,
+                8.0 + (i % 3) * 0.1,
+                10.0 + (i % 4) * 0.2,
+                5.0 + (i % 3) * 0.1,
+                50.0 + (i % 6) * 0.3,
+                200.0 + (i % 10) * 0.5,
+            ]
+            detector.add_sample(features)
+        detector.train()
+
+        health = detector.get_health()
+        assert isinstance(health, dict)
+        assert "status" in health
+        assert "is_trained" in health
+        assert "samples_collected" in health
+        assert "model_trained_at" in health
+        assert "feature_count" in health
+        assert health["is_trained"] is True
+        assert health["samples_collected"] == 80
+        assert health["feature_count"] == 6
+
+    def test_no_prediction_before_training(self):
+        """Predict returns None before model is trained."""
+        import detection
+
+        detector = detection.AnomalyDetector(
+            contamination=0.1, min_samples=30,
+            model_path=self._temp_model_path)
+
+        # Don't train — model should be None
+        result = detector.predict([30.0, 8.0, 10.0, 5.0, 50.0, 200.0])
+        assert result is None, "Should return None before training"
+
+    def test_get_anomaly_detector_singleton(self):
+        """get_anomaly_detector returns singleton instance."""
+        import detection
+        d1 = detection.get_anomaly_detector()
+        d2 = detection.get_anomaly_detector()
+        assert d1 is d2, "Should return same singleton instance"
+
+    def test_build_feature_vector(self):
+        """_build_feature_vector creates correct-length feature list."""
+        import detection
+        detector = detection.AnomalyDetector(model_path=self._temp_model_path)
+
+        metrics = {
+            "cpu_percent": 45.0,
+            "ram_used_gb": 12.5,
+            "disk_read_kbps": 150.0,
+            "disk_write_kbps": 80.0,
+            "network_connections": 120,
+            "process_count": 350,
+        }
+        vec = detector._build_feature_vector(metrics)
+        assert len(vec) == 6, f"Expected 6 features, got {len(vec)}"
+        assert vec == [45.0, 12.5, 150.0, 80.0, 120.0, 350.0]
+
+    def test_build_feature_vector_missing_metric(self):
+        """_build_feature_vector uses 0 for missing metrics."""
+        import detection
+        detector = detection.AnomalyDetector(model_path=self._temp_model_path)
+
+        metrics = {
+            "cpu_percent": 45.0,
+            "ram_used_gb": 12.5,
+        }
+        vec = detector._build_feature_vector(metrics)
+        assert len(vec) == 6
+        assert vec[0] == 45.0
+        assert vec[1] == 12.5
+        assert vec[2] == 0.0  # missing disk_read_kbps
+
+
+class TestAnomalyDetectorHealthEndpoint:
+    """Test the /api/v2/ueba/health endpoint response structure."""
+
+    _temp_model_path = "/tmp/test_health_isolation_forest.pkl"
+
+    def setup_method(self):
+        """Clean up temp model file before each test."""
+        if os.path.exists(self._temp_model_path):
+            os.unlink(self._temp_model_path)
+
+    def teardown_method(self):
+        """Clean up temp model file after each test."""
+        if os.path.exists(self._temp_model_path):
+            os.unlink(self._temp_model_path)
+
+    def test_health_endpoint_response(self):
+        """Health endpoint returns proper JSON structure."""
+        import detection
+        import server
+
+        # We test get_ueba_health() directly, not via HTTP
+        # Use a fresh detector to avoid interference
+        detection._anomaly_detector = None
+        detector = detection.AnomalyDetector(model_path=self._temp_model_path)
+        detection._anomaly_detector = detector
+
+        # Feed samples and train
+        for i in range(80):
+            features = [
+                30.0 + (i % 5) * 0.5,
+                8.0 + (i % 3) * 0.1,
+                10.0 + (i % 4) * 0.2,
+                5.0 + (i % 3) * 0.1,
+                50.0 + (i % 6) * 0.3,
+                200.0 + (i % 10) * 0.5,
+            ]
+            detector.add_sample(features)
+        detector.train()
+
+        health = detection.get_ueba_health()
+        assert isinstance(health, dict)
+        assert "model_status" in health
+        assert "entities_monitored" in health
+        assert "baselines_active" in health
+        assert "anomalies_24h" in health
+        assert "model_trained_at" in health
+        assert "feature_count" in health
+        assert "samples_collected" in health
+        assert "min_samples_required" in health
+        assert "contamination" in health
+        assert "anomaly_score_mean" in health
+
+    def test_health_when_not_trained(self):
+        """Health endpoint shows proper status when model not trained."""
+        import detection
+
+        # Reset the singleton to get a fresh detector with no saved model
+        detection._anomaly_detector = None
+        detector = detection.AnomalyDetector(model_path=self._temp_model_path)
+        detection._anomaly_detector = detector
+
+        health = detection.get_ueba_health()
+        assert health["model_status"] in ("initializing", "insufficient_data")
+        assert health["is_trained"] is False
+        assert health["anomalies_24h"] >= 0

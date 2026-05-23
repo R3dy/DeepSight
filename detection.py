@@ -56,6 +56,7 @@ except ImportError:
 
 # ── Optional imports ──
 HAS_PSUTIL = True
+DETECTION_AVAILABLE = True  # set to False by server.py if import fails
 
 try:
     from inotify_simple import INotify, flags as in_flags
@@ -3332,6 +3333,371 @@ def get_baseline_engine():
 
 
 # ═══════════════════════════════════════════
+# ML Anomaly Detection — IsolationForest
+# ═══════════════════════════════════════════
+
+# Optional scikit-learn import
+try:
+    from sklearn.ensemble import IsolationForest as _IsolationForest
+    import pickle as _pickle
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
+ML_MODEL_MIN_SAMPLES = 100  # minimum samples before training IF model
+ML_MODEL_CONTAMINATION = 0.1  # expected proportion of outliers
+ML_MODEL_PATH = os.path.join(DATA_DIR, "isolation_forest_model.pkl")
+
+# Feature order for the ML model (must match _build_feature_vector)
+ML_FEATURE_METRICS = [
+    "cpu_percent",
+    "ram_used_gb",
+    "disk_read_kbps",
+    "disk_write_kbps",
+    "network_connections",
+    "process_count",
+]
+
+
+class AnomalyDetector:
+    """IsolationForest-based multivariate anomaly detector.
+
+    Collects feature vectors from baseline metrics, trains an IsolationForest
+    model once enough samples are available, and scores new samples in real-time.
+    Supports model persistence (save/load via pickle).
+
+    The model detects multivariate anomalies that univariate z-score may miss
+    (e.g., a combination of moderate CPU + normal RAM + high disk IO that is
+     anomalous when considered together).
+    """
+
+    def __init__(self, contamination=ML_MODEL_CONTAMINATION,
+                 min_samples=ML_MODEL_MIN_SAMPLES,
+                 model_path=None):
+        self.contamination = contamination
+        self.min_samples = min_samples
+        self.model_path = model_path or ML_MODEL_PATH
+        self.model = None
+        self._samples = []  # list of feature vectors
+        self._lock = threading.Lock()
+        self._trained_at = None
+        self._error_message = None
+        self._feature_count = len(ML_FEATURE_METRICS)
+
+        # Attempt to load existing model on init
+        if HAS_SKLEARN:
+            self._try_load_model()
+        else:
+            self._error_message = "scikit-learn not installed"
+
+    @property
+    def training_samples(self):
+        with self._lock:
+            return len(self._samples)
+
+    @property
+    def is_trained(self):
+        with self._lock:
+            return self.model is not None
+
+    @property
+    def status(self):
+        """Return current status string for API consumption."""
+        if not HAS_SKLEARN:
+            return "error"
+        if self.is_trained:
+            return "ready"
+        if self.training_samples < self.min_samples:
+            return "insufficient_data"
+        return "ready_to_train"
+
+    def _try_load_model(self):
+        """Attempt to load a previously saved model from disk."""
+        if os.path.exists(self.model_path):
+            try:
+                with open(self.model_path, "rb") as f:
+                    data = _pickle.load(f)
+                if isinstance(data, dict) and "model" in data:
+                    self.model = data["model"]
+                    self._samples = data.get("samples", [])
+                    self._trained_at = data.get("trained_at")
+                    _log(f"AnomalyDetector: loaded model from {self.model_path} "
+                         f"({len(self._samples)} samples, trained {self._trained_at})")
+                else:
+                    _log("AnomalyDetector: invalid saved model format, starting fresh")
+            except Exception as e:
+                _log(f"AnomalyDetector: failed to load model: {e}, starting fresh")
+                self.model = None
+
+    def add_sample(self, features):
+        """Add a feature vector to the training buffer.
+
+        Args:
+            features: list of float values, one per ML_FEATURE_METRICS
+
+        Returns:
+            dict with prediction result if model is trained, otherwise None
+        """
+        if not HAS_SKLEARN:
+            return None
+
+        with self._lock:
+            self._samples.append(list(features))
+
+        # Auto-trigger training if we just crossed the threshold
+        if self.training_samples >= self.min_samples and not self.is_trained:
+            self.train()
+
+        # If model is trained, predict on this sample
+        if self.is_trained:
+            return self.predict(features)
+
+        return None
+
+    def train(self):
+        """Train the IsolationForest model on collected samples."""
+        if not HAS_SKLEARN:
+            return False
+        if len(self._samples) < self.min_samples:
+            return False
+
+        try:
+            with self._lock:
+                import numpy as np
+                X = np.array(self._samples)
+                model = _IsolationForest(
+                    contamination=self.contamination,
+                    random_state=42,
+                    n_estimators=100,
+                )
+                model.fit(X)
+                self.model = model
+                self._trained_at = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ")
+                self._error_message = None
+
+            _log(f"AnomalyDetector: trained IsolationForest on "
+                 f"{len(self._samples)} samples, {self._feature_count} features")
+
+            # Auto-save after training
+            self.save(self.model_path)
+            return True
+
+        except Exception as e:
+            self._error_message = str(e)
+            _log(f"AnomalyDetector: training failed: {e}")
+            return False
+
+    def predict(self, features):
+        """Score a feature vector with the trained model.
+
+        Args:
+            features: list of float values
+
+        Returns:
+            dict with keys: score (float), is_anomaly (bool),
+            anomaly_score (float 0-1 normalized), or None if model not trained
+        """
+        if not HAS_SKLEARN or not self.is_trained:
+            return None
+
+        try:
+            import numpy as np
+
+            X = np.array([features])
+            # IsolationForest returns -1 for outliers, 1 for inliers
+            raw_pred = self.model.predict(X)[0]
+            # decision_function returns negative scores for anomalies
+            decision = self.model.decision_function(X)[0]
+
+            # Normalize score to 0-1 range where higher = more anomalous
+            # decision_function typically in range [-0.5, 0.5]
+            anomaly_score = max(0.0, min(1.0, 0.5 - decision))
+
+            is_anomaly = bool(raw_pred == -1)
+
+            return {
+                "score": round(float(decision), 4),
+                "anomaly_score": round(float(anomaly_score), 4),
+                "is_anomaly": is_anomaly,
+                "raw_prediction": int(raw_pred),
+            }
+
+        except Exception as e:
+            _log(f"AnomalyDetector: prediction failed: {e}")
+            return None
+
+    def save(self, path=None):
+        """Persist the trained model and samples to disk."""
+        if path is None:
+            path = self.model_path
+        if not self.is_trained:
+            return False
+
+        try:
+            with self._lock:
+                data = {
+                    "model": self.model,
+                    "samples": self._samples,
+                    "trained_at": self._trained_at,
+                    "contamination": self.contamination,
+                    "feature_count": self._feature_count,
+                }
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    _pickle.dump(data, f)
+            _log(f"AnomalyDetector: model saved to {path}")
+            return True
+        except Exception as e:
+            _log(f"AnomalyDetector: save failed: {e}")
+            return False
+
+    def load(self, path=None):
+        """Load a previously saved model from disk."""
+        if path is None:
+            path = self.model_path
+        if not os.path.exists(path):
+            _log(f"AnomalyDetector: no saved model at {path}")
+            return False
+
+        try:
+            with open(path, "rb") as f:
+                data = _pickle.load(f)
+            if isinstance(data, dict) and "model" in data:
+                with self._lock:
+                    self.model = data["model"]
+                    self._samples = data.get("samples", [])
+                    self._trained_at = data.get("trained_at")
+                    self._error_message = None
+                _log(f"AnomalyDetector: model loaded from {path}")
+                return True
+            return False
+        except Exception as e:
+            _log(f"AnomalyDetector: load failed: {e}")
+            self._error_message = str(e)
+            return False
+
+    def get_status(self):
+        """Return current status for UI consumption.
+
+        Returns:
+            dict with status, samples_collected, samples_required, is_trained
+        """
+        return {
+            "status": self.status,
+            "samples_collected": self.training_samples,
+            "samples_required": self.min_samples,
+            "is_trained": self.is_trained,
+            "error_message": self._error_message,
+        }
+
+    def get_health(self):
+        """Return detailed model health metrics for API consumption.
+
+        Returns:
+            dict with model health metrics
+        """
+        return {
+            "status": self.status,
+            "is_trained": self.is_trained,
+            "samples_collected": self.training_samples,
+            "min_samples_required": self.min_samples,
+            "feature_count": self._feature_count,
+            "feature_metrics": ML_FEATURE_METRICS,
+            "contamination": self.contamination,
+            "model_trained_at": self._trained_at,
+            "error_message": self._error_message,
+            "model_path": self.model_path,
+            "sklearn_available": HAS_SKLEARN,
+        }
+
+    def _build_feature_vector(self, metrics):
+        """Convert a metrics dict to a feature vector matching ML_FEATURE_METRICS.
+
+        Args:
+            metrics: dict like {"cpu_percent": 45.0, ...}
+
+        Returns:
+            list of float values in order of ML_FEATURE_METRICS
+        """
+        return [float(metrics.get(m, 0.0)) for m in ML_FEATURE_METRICS]
+
+
+# ── Singleton ──
+_anomaly_detector = None
+_anomaly_detector_lock = threading.Lock()
+
+
+def get_anomaly_detector():
+    """Return the singleton AnomalyDetector, creating it if needed."""
+    global _anomaly_detector
+    if _anomaly_detector is None:
+        with _anomaly_detector_lock:
+            if _anomaly_detector is None:
+                _anomaly_detector = AnomalyDetector()
+                _log("UEBA AnomalyDetector initialized")
+    return _anomaly_detector
+
+
+def get_ueba_health():
+    """Return UEBA health metrics for the /api/v2/ueba/health endpoint.
+
+    Aggregates data from both BaselineEngine and AnomalyDetector to give
+    a complete picture of UEBA system health.
+
+    Returns:
+        dict with model_status, entities_monitored, baselines_active,
+        anomalies_24h, model_trained_at, and other health metrics.
+    """
+    detector = get_anomaly_detector()
+    ml_health = detector.get_health()
+
+    # Get engine metrics
+    engine = get_baseline_engine()
+    baselines = engine.get_baselines()
+    anomalies_24h = engine.get_anomalies(hours=24)
+
+    # Count entities and active baselines
+    hosts = set()
+    active_baselines = 0
+    for b in baselines:
+        hosts.add(b.get("host", ""))
+        if not b.get("is_learning", True):
+            active_baselines += 1
+
+    # Anomalies in last 24h
+    anomaly_count_24h = len(anomalies_24h)
+
+    # Calculate average anomaly score from recent anomalies
+    scores = [a.get("z_score", 0) for a in anomalies_24h if a.get("z_score")]
+    avg_z_score = round(sum(scores) / len(scores), 3) if scores else 0.0
+
+    return {
+        "model_status": ml_health["status"],
+        "is_trained": ml_health["is_trained"],
+        "entities_monitored": len(hosts),
+        "baselines_active": active_baselines,
+        "baselines_total": len(baselines),
+        "anomalies_24h": anomaly_count_24h,
+        "anomaly_score_mean": avg_z_score,
+        "model_trained_at": ml_health["model_trained_at"],
+        "feature_count": ml_health["feature_count"],
+        "samples_collected": ml_health["samples_collected"],
+        "min_samples_required": ml_health["min_samples_required"],
+        "contamination": ml_health["contamination"],
+        "sklearn_available": ml_health["sklearn_available"],
+        "error_message": ml_health["error_message"],
+        "config": {
+            "window_seconds": BASELINE_WINDOW_SECONDS,
+            "learning_samples": BASELINE_LEARNING_SAMPLES,
+            "default_z_threshold": BASELINE_Z_THRESHOLD,
+            "ml_contamination": ML_MODEL_CONTAMINATION,
+            "ml_min_samples": ML_MODEL_MIN_SAMPLES,
+        },
+    }
+
+
+# ═══════════════════════════════════════════
 # Real-Time Event Correlation Engine
 # ═══════════════════════════════════════════
 
@@ -3962,6 +4328,7 @@ def baseline_collector():
 
     host = socket.gethostname()
     engine = get_baseline_engine()
+    ml_detector = get_anomaly_detector() if HAS_SKLEARN else None
 
     while True:
         try:
@@ -3991,7 +4358,7 @@ def baseline_collector():
             metrics["disk_read_kbps"] = max(0, disk_read_kbps)
             metrics["disk_write_kbps"] = max(0, disk_write_kbps)
 
-            # Update baselines for each metric
+            # Update baselines for each metric (univariate z-score)
             for metric_key in BASELINE_METRICS:
                 value = metrics.get(metric_key)
                 if value is None:
@@ -4002,6 +4369,41 @@ def baseline_collector():
                     z_score, mean, stddev, is_learning = result
                     engine.check_and_alert(
                         host, metric_key, z_score, value, mean, stddev, is_learning
+                    )
+
+            # ── Feed to ML anomaly detector (multivariate IsolationForest) ──
+            if ml_detector is not None:
+                feature_vector = ml_detector._build_feature_vector(metrics)
+                ml_result = ml_detector.add_sample(feature_vector)
+
+                # If ML model is trained and detected an anomaly
+                if ml_result and ml_result.get("is_anomaly"):
+                    anomaly_score = ml_result.get("anomaly_score", 0.0)
+                    severity = "high" if anomaly_score > 0.7 else (
+                        "medium" if anomaly_score > 0.4 else "low")
+
+                    create_alert(
+                        severity=severity,
+                        category="ueba_ml",
+                        title=f"ML Anomaly Detected on {host} (score={anomaly_score:.2f})",
+                        description=(
+                            f"IsolationForest detected multivariate anomaly on {host}.\n"
+                            f"Anomaly score: {anomaly_score:.2f}\n"
+                            f"Features: CPU={metrics.get('cpu_percent')}%, "
+                            f"RAM={metrics.get('ram_used_gb')}GB, "
+                            f"Disk R/W={metrics.get('disk_read_kbps')}/{metrics.get('disk_write_kbps')} KB/s, "
+                            f"NetConns={metrics.get('network_connections')}, "
+                            f"Procs={metrics.get('process_count')}"
+                        ),
+                        source_host=host,
+                        mitre_tactic="Discovery",
+                        mitre_technique="T1082 (System Information Discovery)",
+                        raw_data={
+                            "anomaly_score": anomaly_score,
+                            "feature_vector": feature_vector,
+                            "feature_labels": ML_FEATURE_METRICS,
+                            "ml_model": "IsolationForest",
+                        },
                     )
 
         except Exception as e:
@@ -4058,6 +4460,9 @@ def start_collectors():
 
     # Initialize baseline engine early (creates tables)
     get_baseline_engine()
+
+    # Initialize ML anomaly detector (creates model if saved, otherwise collects samples)
+    get_anomaly_detector()
 
     # Initialize Sigma engine
     if HAS_SIGMA:
