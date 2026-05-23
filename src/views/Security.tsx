@@ -10,11 +10,11 @@ import {
   AlertSummaryBar, AlertList, BeaconingList, AuthEventsList,
   FileIntegrityTable, SecurityDashboards, ThreatIntelGrid,
   SyslogViewer, SearchInterface, AttackCoverageHeatmap,
-  CoverageGapAnalysis,
+  CoverageGapAnalysis, PlaybookHistory,
 } from '../components/security';
 import type { Alert } from '../types';
 
-type SecTab = 'overview' | 'search' | 'syslog' | 'attack';
+type SecTab = 'overview' | 'search' | 'syslog' | 'attack' | 'playbooks';
 
 export function Security() {
   const queryClient = useQueryClient();
@@ -165,6 +165,7 @@ export function Security() {
             {([
               { key: 'overview' as const, label: 'Overview', icon: '🛡️' },
               { key: 'attack' as const, label: 'ATT&CK', icon: '🎯' },
+              { key: 'playbooks' as const, label: 'Playbooks', icon: '⚡' },
               { key: 'search' as const, label: 'Search', icon: '🔍' },
               { key: 'syslog' as const, label: 'Syslog', icon: '📋' },
             ]).map(t => (
@@ -284,6 +285,10 @@ export function Security() {
           </p>
           <SearchInterface />
         </div>
+      )}
+
+{ tab === 'playbooks' && (
+        <PlaybookHistory />
       )}
 
       {/* Syslog Tab */}

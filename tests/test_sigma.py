@@ -10,10 +10,7 @@ Covers:
   - Sigma rules fire alongside Python rules
 """
 
-import json
 import os
-import time
-import tempfile
 import pytest
 
 # Add the project root to path
@@ -21,8 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the sigma engine (before detection to avoid DB init side effects)
-import sigma_engine
-from sigma_engine import SigmaEngine, SigmaRule, evaluate_sigma, get_sigma_engine
+from sigma_engine import SigmaRule, evaluate_sigma, get_sigma_engine
 
 
 class TestSigmaRuleParsing:
@@ -498,7 +494,7 @@ class TestDetectionIntegration:
     def test_alert_persistence_in_sqlite(self):
         """Alert written to SQLite and survives query (VAL-SEC-060)."""
         import detection
-        conn = detection.get_db()
+        detection.get_db()
 
         # Create a test alert
         a = detection.create_alert(
@@ -622,13 +618,8 @@ class TestRealWorldRules:
 
     def test_ssh_brute_force_sigma(self):
         """SSH brute force Sigma rule works with auth events."""
-        event = {
-            "event_type": "sigma_auth_event",
-            "event_type_field": "ssh_fail",
-        }
         # The rule expects the event_type as a field in the event
         event_with_type = {
-            "event_type": "sigma_auth_event",
             "event_type": "ssh_fail",
         }
         # Let's check with a proper matching approach

@@ -4,7 +4,6 @@ Covers: password hashing (argon2id), token lifecycle, API key auth,
 rate limiting, audit logging, admin auto-creation, and endpoint protection.
 """
 
-import json
 import os
 import sys
 import time

@@ -9,3 +9,4 @@ export * from './syslog';
 export * from './threatIntel';
 export * from './attackCoverage';
 export * from './cases';
+export * from './playbooks';

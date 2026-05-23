@@ -4,10 +4,8 @@ OpenAPI / Swagger Documentation for the v2 API.
 Serves the OpenAPI 3.0 spec at /api/v2/openapi.json and Swagger UI at /api/v2/docs/.
 """
 
-import os
-import time
 
-from flask import jsonify, request, send_file
+from flask import jsonify, request
 
 from routes.v2 import v2_bp, auth
 

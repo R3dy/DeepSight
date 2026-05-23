@@ -48,7 +48,6 @@ class TestNotifierModule:
             "routing": {"critical": []},
         }
         # Just test that it doesn't crash
-        import notifier
         results = notifier.dispatch(
             {"severity": "critical", "title": "test"}, config
         )

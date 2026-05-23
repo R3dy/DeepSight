@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install deps
-        run: pip install flask psutil pytest pyyaml scikit-learn
+        run: pip install flask psutil pytest pyyaml scikit-learn requests
       - name: Test
         run: python3 -m pytest tests/ -v
 

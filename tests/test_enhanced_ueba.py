@@ -2,8 +2,6 @@
 
 import sys
 import os
-import time
-import json
 import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,7 +13,6 @@ class TestEntityBaselines:
     def test_entity_baseline_creation(self):
         """Entity baselines can be created for hosts and users."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -47,7 +44,6 @@ class TestEntityBaselines:
     def test_entity_baseline_zscore(self):
         """Entity baselines correctly compute z-scores."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -77,7 +73,6 @@ class TestEntityBaselines:
     def test_entity_baseline_sqlite_persistence(self):
         """Entity baseline state persists to SQLite."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -99,7 +94,6 @@ class TestEntityBaselines:
     def test_list_all_entities(self):
         """Can list all entities with their types."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -121,7 +115,6 @@ class TestEntityBaselines:
     def test_entity_metrics_list(self):
         """Can list all metrics tracked for an entity."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -144,7 +137,6 @@ class TestPeerGroupComparison:
     def test_peer_group_assignment(self):
         """Entities can be assigned to peer groups."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -165,7 +157,6 @@ class TestPeerGroupComparison:
     def test_peer_group_auto_assignment(self):
         """Entities are auto-assigned based on hostname patterns."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -185,7 +176,6 @@ class TestPeerGroupComparison:
     def test_peer_comparison_statistics(self):
         """Peer group comparison provides statistics."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -218,7 +208,6 @@ class TestPeerGroupComparison:
     def test_list_peer_groups(self):
         """Can list all peer groups."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -240,7 +229,6 @@ class TestRiskScorer:
     def test_initial_risk_score(self):
         """RiskScorer starts entities at 0 risk."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -254,7 +242,6 @@ class TestRiskScorer:
     def test_risk_score_increase(self):
         """Risk score increases when anomalous events occur."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -269,7 +256,6 @@ class TestRiskScorer:
     def test_risk_score_decay(self):
         """Risk scores decay over time."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -304,7 +290,6 @@ class TestRiskScorer:
     def test_composite_factors(self):
         """Risk score breakdown shows contributing factors."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -328,7 +313,6 @@ class TestRiskScorer:
     def test_risk_levels(self):
         """Risk levels map to correct thresholds."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -373,7 +357,6 @@ class TestRiskScorer:
     def test_risk_score_history(self):
         """Risk score changes are recorded in history."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -388,7 +371,6 @@ class TestRiskScorer:
     def test_risk_threshold_config(self):
         """Risk thresholds are configurable."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -407,7 +389,6 @@ class TestRiskScorer:
     def test_decay_notification_on_crossing_threshold(self):
         """When risk decays below a threshold, it's recorded."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -443,7 +424,6 @@ class TestUEBAApiEndpoints:
     def test_timeline_endpoint_structure(self):
         """Timeline endpoint returns anomaly timeline data."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -474,7 +454,6 @@ class TestUEBAApiEndpoints:
     def test_deviations_endpoint_structure(self):
         """Deviations endpoint returns sorted entity deviations."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -497,7 +476,6 @@ class TestUEBAApiEndpoints:
     def test_anomaly_list_pagination(self):
         """Anomaly list supports limit/offset pagination."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -525,7 +503,6 @@ class TestUEBAApiEndpoints:
     def test_anomaly_acknowledgment(self):
         """Anomalies can be acknowledged."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -552,7 +529,6 @@ class TestUEBAApiEndpoints:
     def test_anomaly_promote_to_alert(self):
         """Anomalies can be promoted to alerts."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -579,7 +555,6 @@ class TestUEBAApiEndpoints:
     def test_false_positive_marking(self):
         """Anomalies can be marked as false positives."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -606,7 +581,6 @@ class TestUEBAApiEndpoints:
     def test_bulk_anomaly_acknowledgment(self):
         """Multiple anomalies can be acknowledged in bulk."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -638,7 +612,6 @@ class TestUEBAApiEndpoints:
     def test_baseline_reset(self):
         """Entity baseline can be reset."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -650,7 +623,7 @@ class TestUEBAApiEndpoints:
 
         baselines_before = engine.get_entity_baselines(entity_type="host", entity_id="reset-test")
         assert len(baselines_before) == 1
-        assert baselines_before[0]["is_learning"] == False
+        assert not baselines_before[0]["is_learning"]
 
         # Reset
         result = engine.reset_entity_baseline("host", "reset-test")
@@ -659,12 +632,11 @@ class TestUEBAApiEndpoints:
         baselines_after = engine.get_entity_baselines(entity_type="host", entity_id="reset-test")
         # After reset, baseline should be in learning state or removed
         if len(baselines_after) > 0:
-            assert baselines_after[0]["is_learning"] == True
+            assert baselines_after[0]["is_learning"]
 
     def test_entity_search(self):
         """Entities can be searched by name."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -688,7 +660,6 @@ class TestUEBAApiEndpoints:
     def test_export_anomalies(self):
         """Anomaly data can be exported."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -716,7 +687,6 @@ class TestUEBAApiEndpoints:
     def test_risk_score_notification_threshold(self):
         """High risk triggers notification threshold flag."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -742,7 +712,6 @@ class TestUEBAIntegration:
     def test_full_flow_baseline_to_risk(self):
         """End-to-end: entity baseline → anomaly → risk score."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -792,7 +761,6 @@ class TestUEBAIntegration:
     def test_risk_score_trend(self):
         """Risk score trend shows direction over time."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -813,7 +781,6 @@ class TestUEBAIntegration:
     def test_entity_type_filtering(self):
         """All UEBA data can be filtered by entity type."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -839,7 +806,6 @@ class TestUEBAIntegration:
     def test_ueba_health_aggregate(self):
         """UEBA health endpoint aggregates comprehensive metrics."""
         import ueba_engine
-        import sqlite3
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row

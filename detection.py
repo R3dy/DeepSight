@@ -48,14 +48,15 @@ try:
 except ImportError:
     HAS_SIGMA = False
 
-    def evaluate_sigma(event):
-        return []
+# ── Optional playbook engine (SOAR enrichment) ──
+try:
+    from playbook_engine import get_playbook_engine as _get_playbook_engine
+    HAS_PLAYBOOKS = True
+except ImportError:
+    HAS_PLAYBOOKS = False
 
-    def get_sigma_engine():
+    def _get_playbook_engine():
         return None
-
-    def _update_collector_health(*args, **kwargs):
-        pass
 
 # ── Optional imports ──
 HAS_PSUTIL = True
@@ -1541,6 +1542,19 @@ def _group_alert(alert_dict):
         pass  # grouping is best-effort, don't break alert creation
 
 
+def _enrich_alert(alert_dict):
+    """Feed a newly created alert into the SOAR playbook engine for automated enrichment."""
+    if not HAS_PLAYBOOKS:
+        return
+    try:
+        engine = _get_playbook_engine()
+        if engine is None:
+            return
+        engine.process_alert(alert_dict)
+    except Exception:
+        pass  # enrichment is best-effort, don't break alert creation
+
+
 def create_alert(severity, category, title, description="", source_host="",
                  source_ip="", mitre_tactic="", mitre_technique="",
                  process_pid=None, process_name="", raw_data=None):
@@ -1581,6 +1595,8 @@ def create_alert(severity, category, title, description="", source_host="",
         _group_alert(alert_dict)
         # Emit via SocketIO for real-time frontend updates
         _emit_alert_socketio(alert_dict)
+        # Feed to SOAR playbook engine for automated enrichment (non-blocking)
+        _enrich_alert(alert_dict)
         return alert_dict
     except Exception as e:
         _log(f"Error creating alert: {e}")
