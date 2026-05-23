@@ -4594,6 +4594,20 @@ class CorrelationEngine:
             return
 
         # For each pattern, look for a complete sequence in the buffered events
+        # Pre-compute dedup set before acquiring lock to avoid holding
+        # _pending_lock across DB queries (important for non-WAL backends).
+        completed_keys = set()
+        if self.db:
+            try:
+                rows = self.db.execute(
+                    """SELECT host, chain_id FROM correlation_matches
+                       WHERE completed_at >= datetime('now', ?)""",
+                    (f'-{EVENT_BUFFER_WINDOW_SECONDS} seconds',),
+                ).fetchall()
+                completed_keys = {(r[0], r[1]) for r in rows}
+            except Exception:
+                pass  # DB check is best-effort
+
         with self._pending_lock:
             for pattern in self.patterns:
                 chain_id = pattern["id"]
@@ -4612,55 +4626,43 @@ class CorrelationEngine:
                 for host, alerts in host_events.items():
                     key = (host, chain_id)
 
-                    # Skip if this chain is already completed or actively tracked
-                    if key not in self._pending:
-                        # Try to match the full sequence from scratch
-                        si = 0  # step index
-                        step_counts = {}
-                        last_ts = None
+                    # Skip if this chain is already completed (dedup set) or actively tracked
+                    if key in completed_keys or key in self._pending:
+                        continue
 
-                        for alert in alerts:
-                            category = alert.get("category", "")
-                            if si >= len(steps):
-                                break
+                    # Try to match the full sequence from scratch
+                    si = 0  # step index
+                    step_counts = {}
+                    last_ts = None
 
-                            needed = steps[si]
-                            if needed["category"] == category:
-                                step_counts[category] = step_counts.get(category, 0) + 1
-                                # Extract timestamp from alert or use now
-                                alert_ts = now  # fallback
-                                last_ts = alert_ts
+                    for alert in alerts:
+                        category = alert.get("category", "")
+                        if si >= len(steps):
+                            break
 
-                                if step_counts[category] >= needed["min_count"]:
-                                    si += 1
+                        needed = steps[si]
+                        if needed["category"] == category:
+                            step_counts[category] = step_counts.get(category, 0) + 1
+                            last_ts = now  # fallback
 
-                        if si >= len(steps) and last_ts is not None:
-                            # Dedup: skip if this chain+host was already completed
-                            # within the buffer window (prevents duplicate rows on
-                            # every 10s periodic evaluation cycle).
-                            try:
-                                existing = self.db.execute(
-                                    """SELECT id FROM correlation_matches
-                                       WHERE chain_id = ? AND host = ?
-                                       AND completed_at >= datetime('now', ?)
-                                       LIMIT 1""",
-                                    (chain_id, host, f'-{EVENT_BUFFER_WINDOW_SECONDS} seconds'),
-                                ).fetchone()
-                                if existing:
-                                    continue
-                            except Exception:
-                                pass  # DB check is best-effort
+                            if step_counts[category] >= needed["min_count"]:
+                                si += 1
 
-                            # Full chain matched from buffered events
-                            pending = {
-                                "step_index": si,
-                                "started_at": last_ts,
-                                "last_match_at": last_ts,
-                                "step_counts": step_counts,
-                            }
-                            # Temporarily add to pending so _check_completion can clean up
-                            self._pending[key] = pending
+                    if si >= len(steps) and last_ts is not None:
+                        # Full chain matched from buffered events
+                        pending = {
+                            "step_index": si,
+                            "started_at": last_ts,
+                            "last_match_at": last_ts,
+                            "step_counts": step_counts,
+                        }
+                        # Guard against pending-leak: if _check_completion raises,
+                        # ensure the key is removed so subsequent cycles can retry.
+                        self._pending[key] = pending
+                        try:
                             self._check_completion(key, pattern, pending)
+                        finally:
+                            self._pending.pop(key, None)
 
     def get_buffered_events(self, host=None, category=None, limit=100):
         """Return events currently in the sliding window buffer.
