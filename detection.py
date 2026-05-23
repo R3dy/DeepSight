@@ -4319,7 +4319,11 @@ _prev_disk_lock = threading.Lock()
 
 def baseline_collector():
     """Background thread: collect metrics every BASELINE_COLLECT_INTERVAL seconds,
-    update baselines, and fire anomaly alerts."""
+    update baselines, and fire anomaly alerts.
+
+    Feeds both the classic BaselineEngine (per-host, univariate) and the
+    EnhancedUEBAEngine (per-entity, peer groups, composite risk scoring).
+    """
     global _prev_disk_io
     if HAS_SIGMA:
         _update_collector_health('baseline', 'running')
@@ -4329,6 +4333,26 @@ def baseline_collector():
     host = socket.gethostname()
     engine = get_baseline_engine()
     ml_detector = get_anomaly_detector() if HAS_SKLEARN else None
+
+    # ── Enhanced UEBA engine (per-entity baselines, peer groups, risk scoring) ──
+    try:
+        import ueba_engine
+        enh_engine = ueba_engine.get_enhanced_ueba_engine()
+        pgm = ueba_engine.get_peer_group_manager()
+        scorer = ueba_engine.get_risk_scorer()
+        _has_enhanced_ueba = True
+    except ImportError:
+        enh_engine = None
+        pgm = None
+        scorer = None
+        _has_enhanced_ueba = False
+
+    # Auto-assign host to peer group on first run
+    if _has_enhanced_ueba and pgm:
+        try:
+            pgm.auto_assign_group(host, "host")
+        except Exception:
+            pass
 
     while True:
         try:
@@ -4371,12 +4395,30 @@ def baseline_collector():
                         host, metric_key, z_score, value, mean, stddev, is_learning
                     )
 
+                # ── Also feed to enhanced UEBA engine ──
+                if _has_enhanced_ueba and enh_engine:
+                    enh_result = enh_engine.update_entity("host", host, metric_key, value, now)
+                    if enh_result:
+                        enh_z, enh_mean, enh_stddev, enh_learning = enh_result
+                        threshold = enh_engine._get_threshold(metric_key)
+                        if not enh_learning and abs(enh_z) >= threshold:
+                            severity = "high" if abs(enh_z) > 5.0 else (
+                                "medium" if abs(enh_z) > 4.0 else "low")
+                            anomaly_type = "spike" if enh_z > 0 else "drop"
+                            enh_engine.record_anomaly(
+                                "host", host, metric_key, enh_z, value,
+                                enh_mean, enh_stddev, severity, anomaly_type
+                            )
+                            # Add risk signal
+                            if scorer:
+                                risk_value = min(100.0, abs(enh_z) * 10)
+                                scorer.add_signal("host", host, "behavioral_deviation", risk_value)
+
             # ── Feed to ML anomaly detector (multivariate IsolationForest) ──
             if ml_detector is not None:
                 feature_vector = ml_detector._build_feature_vector(metrics)
                 ml_result = ml_detector.add_sample(feature_vector)
 
-                # If ML model is trained and detected an anomaly
                 if ml_result and ml_result.get("is_anomaly"):
                     anomaly_score = ml_result.get("anomaly_score", 0.0)
                     severity = "high" if anomaly_score > 0.7 else (
@@ -4405,6 +4447,11 @@ def baseline_collector():
                             "ml_model": "IsolationForest",
                         },
                     )
+
+                    # Add ML risk signal
+                    if _has_enhanced_ueba and scorer:
+                        scorer.add_signal("host", host, "behavioral_deviation",
+                                          min(100.0, anomaly_score * 100))
 
         except Exception as e:
             _log(f"baseline_collector error: {e}")
@@ -4460,6 +4507,16 @@ def start_collectors():
 
     # Initialize baseline engine early (creates tables)
     get_baseline_engine()
+
+    # Initialize enhanced UEBA engine (per-entity baselines, peer groups, risk scoring)
+    try:
+        import ueba_engine
+        ueba_engine.get_enhanced_ueba_engine()
+        ueba_engine.get_peer_group_manager()
+        ueba_engine.get_risk_scorer()
+        _log("Enhanced UEBA Engine initialized (per-entity baselines, peer groups, risk scoring)")
+    except ImportError as e:
+        _log(f"Enhanced UEBA Engine not available: {e}")
 
     # Initialize ML anomaly detector (creates model if saved, otherwise collects samples)
     get_anomaly_detector()
