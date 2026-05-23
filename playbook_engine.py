@@ -803,6 +803,18 @@ def clear_feodo_cache():
 # Playbook Definitions (hardcoded catalog)
 # ═══════════════════════════════════════════
 
+_HASH_PATTERN = re.compile(r'\b[a-fA-F0-9]{32,64}\b')
+
+
+def _check_file_hash_trigger(alert):
+    """Check if alert should trigger file hash enrichment."""
+    category = alert.get("category")
+    if category in ("malware", "file_integrity", "suspicious_execution"):
+        return True
+    combined = alert.get("description", "") + alert.get("title", "")
+    return bool(_HASH_PATTERN.search(combined))
+
+
 def _build_playbook_catalog():
     """Build the catalog of all enrichment playbooks."""
     funcs = _EnrichmentFunctions()
@@ -839,11 +851,7 @@ def _build_playbook_catalog():
         Playbook(
             name="file_hash_enrichment",
             description="Look up file hashes via VirusTotal",
-            trigger_condition=lambda alert: (
-                alert.get("category") in ("malware", "file_integrity", "suspicious_execution")
-                or bool(re.search(r'\b[a-fA-F0-9]{32,64}\b',
-                                   alert.get("description", "") + alert.get("title", "")))
-            ),
+            trigger_condition=lambda alert: _check_file_hash_trigger(alert),
             steps=[
                 PlaybookStep("virustotal_hash", funcs.virustotal_check),
             ],
