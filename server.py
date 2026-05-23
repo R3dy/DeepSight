@@ -1722,8 +1722,8 @@ def api_anomalies():
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
     host = request.args.get("host")
-    limit = request.args.get("limit", 100, type=int)
-    hours = request.args.get("hours", 24, type=int)
+    limit = max(request.args.get("limit", 100, type=int), 1)
+    hours = max(request.args.get("hours", 24, type=int), 1)
     engine = detection.get_baseline_engine()
     anomalies = engine.get_anomalies(host=host, limit=limit, hours=hours)
 
