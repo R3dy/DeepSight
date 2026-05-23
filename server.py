@@ -1633,7 +1633,10 @@ if DETECTION_AVAILABLE and _socketio_available and socketio is not None:
 @app.route("/api/alerts")
 @auth.require_auth
 def api_alerts():
-    """Return recent alerts with optional filters."""
+    """Return recent alerts with optional filters.
+
+    Query params: severity, acknowledged, host, category, since, hours, limit
+    """
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
     severity = request.args.get("severity")
@@ -1641,7 +1644,15 @@ def api_alerts():
     acknowledged = None
     if acknowledged_str is not None:
         acknowledged = acknowledged_str.lower() == "true"
-    alerts = detection.get_alerts(severity=severity, acknowledged=acknowledged)
+    host = request.args.get("host")
+    category = request.args.get("category")
+    since = request.args.get("since")
+    hours = request.args.get("hours", 24, type=int)
+    limit = request.args.get("limit", 200, type=int)
+    alerts = detection.get_alerts(
+        hours=hours, severity=severity, acknowledged=acknowledged,
+        host=host, category=category, since=since, limit=limit,
+    )
     return jsonify({"alerts": alerts, "count": len(alerts)})
 
 
@@ -1657,20 +1668,36 @@ def api_beaconing():
 @app.route("/api/auth-events")
 @auth.require_auth
 def api_auth_events():
-    """Return recent auth events with optional type filter."""
+    """Return recent auth events with optional type filter.
+
+    Query params: type, hours, since, limit
+    """
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
     event_type = request.args.get("type")
-    return jsonify({"events": detection.get_auth_events(event_type=event_type)})
+    hours = request.args.get("hours", 1, type=int)
+    since = request.args.get("since")
+    limit = request.args.get("limit", 200, type=int)
+    return jsonify({"events": detection.get_auth_events(
+        hours=hours, event_type=event_type, since=since, limit=limit
+    )})
 
 
 @app.route("/api/file-events")
 @auth.require_auth
 def api_file_events():
-    """Return recent file integrity events."""
+    """Return recent file integrity events with optional path filter.
+
+    Query params: path, hours, limit
+    """
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
-    return jsonify({"events": detection.get_file_events()})
+    path_filter = request.args.get("path")
+    hours = request.args.get("hours", 24, type=int)
+    limit = request.args.get("limit", 200, type=int)
+    return jsonify({"events": detection.get_file_events(
+        hours=hours, path=path_filter, limit=limit
+    )})
 
 
 @app.route("/api/security-summary")
@@ -1694,6 +1721,53 @@ def api_acknowledge_alert():
         return jsonify({"error": "missing alert id"}), 400
     ok = detection.acknowledge_alert(int(alert_id))
     return jsonify({"status": "ok" if ok else "not found", "id": alert_id})
+
+
+@app.route("/api/alerts/acknowledge/bulk", methods=["POST"])
+@auth.require_auth
+def api_acknowledge_alerts_bulk():
+    """Bulk-acknowledge multiple alerts at once.
+
+    POST body: {"alert_ids": [1, 2, 3]}
+    """
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    data = request.get_json(silent=True) or {}
+    alert_ids = data.get("alert_ids", [])
+    if not alert_ids or not isinstance(alert_ids, list):
+        return jsonify({"error": "missing or invalid alert_ids (must be a list)"}), 400
+    result = detection.acknowledge_alerts_bulk([int(a) for a in alert_ids])
+    status_code = 200 if result["failed_ids"] == [] else 207
+    return jsonify(result), status_code
+
+
+@app.route("/api/alerts/export")
+@auth.require_auth
+def api_export_alerts():
+    """Export alerts as CSV or JSON.
+
+    Query params: format (csv|json), hours, severity, host, category, limit
+    """
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    export_format = request.args.get("format", "json").lower()
+    if export_format not in ("json", "csv"):
+        return jsonify({"error": "unsupported format, use 'json' or 'csv'"}), 400
+    hours = request.args.get("hours", 24, type=int)
+    severity = request.args.get("severity")
+    host = request.args.get("host")
+    category = request.args.get("category")
+    limit = request.args.get("limit", 1000, type=int)
+    data_str, content_type, filename = detection.export_alerts(
+        export_format=export_format, hours=hours, severity=severity,
+        host=host, category=category, limit=limit,
+    )
+    from flask import Response
+    return Response(
+        data_str,
+        mimetype=content_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @app.route("/api/alert-stats")

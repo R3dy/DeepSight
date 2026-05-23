@@ -88,6 +88,10 @@ DGA_ENTROPY_THRESHOLD = 3.5
 DGA_ALERT_THRESHOLD = 3.8
 ALERT_DEDUP_WINDOW_S = 300          # 5 minutes
 
+# ── Alert Grouping Configuration ──
+GROUPING_WINDOW_SECONDS = 300       # default grouping window: 5 minutes
+AUTO_GROUP_ENABLED = True           # whether auto-grouping is active
+
 # Files to watch for integrity
 SENSITIVE_FILES = [
     "/etc/passwd",
@@ -662,6 +666,7 @@ def _create_tables(conn):
     # ── Schema migrations for new columns ──
     _migrate_beaconing_schema(conn)
     _migrate_correlation_schema(conn)
+    _migrate_incident_schema(conn)
     conn.commit()
 
 
@@ -701,6 +706,48 @@ def _migrate_correlation_schema(conn):
             ON correlation_matches(host);
         CREATE INDEX IF NOT EXISTS idx_correlation_chain
             ON correlation_matches(chain_id);
+    """)
+
+
+def _migrate_incident_schema(conn):
+    """Create incidents and incident_alerts tables for alert grouping (safe migration)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            severity TEXT NOT NULL DEFAULT 'medium'
+                CHECK(severity IN ('critical','high','medium','low')),
+            status TEXT NOT NULL DEFAULT 'new'
+                CHECK(status IN ('new','investigating','escalated','resolved','closed')),
+            source_host TEXT DEFAULT '',
+            mitre_technique TEXT DEFAULT '',
+            grouping_window_s INTEGER DEFAULT 300,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            resolved_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS incident_alerts (
+            incident_id INTEGER NOT NULL,
+            alert_id INTEGER NOT NULL,
+            added_at TEXT NOT NULL DEFAULT (datetime('now')),
+            auto_grouped INTEGER DEFAULT 0,
+            PRIMARY KEY (incident_id, alert_id),
+            FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+            FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incidents_status
+            ON incidents(status);
+        CREATE INDEX IF NOT EXISTS idx_incidents_host
+            ON incidents(source_host);
+        CREATE INDEX IF NOT EXISTS idx_incidents_created
+            ON incidents(created_at);
+        CREATE INDEX IF NOT EXISTS idx_incident_alerts_incident
+            ON incident_alerts(incident_id);
+        CREATE INDEX IF NOT EXISTS idx_incident_alerts_alert
+            ON incident_alerts(alert_id);
     """)
 
 
@@ -1481,6 +1528,17 @@ def _correlate_alert(alert_dict):
         pass  # correlation is best-effort, don't break alert creation
 
 
+def _group_alert(alert_dict):
+    """Feed a newly created alert into the alert grouper if available and auto-group is enabled."""
+    if not AUTO_GROUP_ENABLED:
+        return
+    try:
+        grouper = get_alert_grouper()
+        grouper.process_alert(alert_dict)
+    except Exception:
+        pass  # grouping is best-effort, don't break alert creation
+
+
 def create_alert(severity, category, title, description="", source_host="",
                  source_ip="", mitre_tactic="", mitre_technique="",
                  process_pid=None, process_name="", raw_data=None):
@@ -1517,6 +1575,8 @@ def create_alert(severity, category, title, description="", source_host="",
         _dispatch_notification(alert_dict)
         # Feed to correlation engine (non-blocking, thread-safe)
         _correlate_alert(alert_dict)
+        # Feed to alert grouper for incident grouping
+        _group_alert(alert_dict)
         # Emit via SocketIO for real-time frontend updates
         _emit_alert_socketio(alert_dict)
         return alert_dict
@@ -2931,18 +2991,43 @@ def _scan_tmp_executables():
 # API helper functions (used by server.py routes)
 # ═══════════════════════════════════════════
 
-def get_alerts(hours=24, severity=None, acknowledged=None, limit=200):
-    """Query recent alerts with optional filters."""
+def get_alerts(hours=24, severity=None, acknowledged=None, host=None,
+               category=None, since=None, limit=200):
+    """Query recent alerts with optional filters.
+
+    Parameters:
+        hours: lookback in hours (ignored if since is provided)
+        severity: filter by severity level
+        acknowledged: None=all, True=ack'd, False=unack'd
+        host: filter by source_host or source_ip
+        category: filter by alert category
+        since: ISO timestamp string for absolute time-range start
+        limit: max results
+    """
     try:
         conn = get_db()
-        q = "SELECT * FROM alerts WHERE timestamp >= datetime('now', ?) "
-        params = [f"-{hours} hours"]
+        q = "SELECT * FROM alerts WHERE 1=1 "
+        params = []
+
+        if since:
+            q += "AND timestamp >= ? "
+            params.append(since)
+        else:
+            q += "AND timestamp >= datetime('now', ?) "
+            params.append(f"-{hours} hours")
+
         if severity and severity != "all":
             q += "AND severity = ? "
             params.append(severity)
         if acknowledged is not None:
             q += "AND acknowledged = ? "
             params.append(1 if acknowledged else 0)
+        if host:
+            q += "AND (source_host = ? OR source_ip = ?) "
+            params.extend([host, host])
+        if category:
+            q += "AND category = ? "
+            params.append(category)
         q += "ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(q, params).fetchall()
@@ -2967,12 +3052,18 @@ def get_beaconing(hours=3, limit=100):
         return []
 
 
-def get_auth_events(hours=1, event_type=None, limit=200):
-    """Query recent auth events with optional type filter."""
+def get_auth_events(hours=1, event_type=None, since=None, limit=200):
+    """Query recent auth events with optional type filter and time range."""
     try:
         conn = get_db()
-        q = "SELECT * FROM auth_events WHERE timestamp >= datetime('now', ?) "
-        params = [f"-{hours} hours"]
+        q = "SELECT * FROM auth_events WHERE 1=1 "
+        params = []
+        if since:
+            q += "AND timestamp >= ? "
+            params.append(since)
+        else:
+            q += "AND timestamp >= datetime('now', ?) "
+            params.append(f"-{hours} hours")
         if event_type and event_type != "all":
             q += "AND event_type = ? "
             params.append(event_type)
@@ -2985,15 +3076,18 @@ def get_auth_events(hours=1, event_type=None, limit=200):
         return []
 
 
-def get_file_events(hours=24, limit=200):
-    """Query recent file integrity events."""
+def get_file_events(hours=24, path=None, limit=200):
+    """Query recent file integrity events with optional path filter."""
     try:
         conn = get_db()
-        rows = conn.execute("""
-            SELECT * FROM file_events
-            WHERE timestamp >= datetime('now', ?)
-            ORDER BY timestamp DESC LIMIT ?
-        """, (f"-{hours} hours", limit)).fetchall()
+        q = "SELECT * FROM file_events WHERE timestamp >= datetime('now', ?) "
+        params = [f"-{hours} hours"]
+        if path:
+            q += "AND path LIKE ? "
+            params.append(f"%{path}%")
+        q += "ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(q, params).fetchall()
         return [dict(r) for r in rows]
     except Exception as e:
         _log(f"get_file_events error: {e}")
@@ -4680,6 +4774,533 @@ def get_correlation_engine():
                 _correlation_engine = CorrelationEngine(get_db())
                 _log("CorrelationEngine initialized")
     return _correlation_engine
+
+
+# ═══════════════════════════════════════════
+# Alert Grouper — Intelligent Alert-to-Incident Grouping
+# ═══════════════════════════════════════════
+
+class AlertGrouper:
+    """Intelligent alert grouping engine that correlates related alerts into incidents.
+
+    Groups alerts based on:
+      - Same source host (or source_ip if host is empty)
+      - Same MITRE ATT&CK technique (attack pattern)
+      - Overlapping time windows (configurable via GROUPING_WINDOW_SECONDS)
+
+    When a new alert arrives:
+      1. Find open incidents matching the alert's host and MITRE technique
+         within the configured grouping window.
+      2. If a matching incident exists, add the alert to it and update metadata.
+      3. If no matching incident exists, create a new incident from the alert.
+
+    Supports manual group/ungroup operations via API.
+    """
+
+    def __init__(self, db_conn):
+        self.db = db_conn
+        self._lock = threading.RLock()
+
+    @property
+    def grouping_window_s(self):
+        return GROUPING_WINDOW_SECONDS
+
+    def set_grouping_window(self, seconds: int):
+        """Update the grouping window configuration at runtime."""
+        global GROUPING_WINDOW_SECONDS
+        if seconds < 60:
+            seconds = 60  # minimum 1 minute
+        if seconds > 86400:
+            seconds = 86400  # maximum 24 hours
+        GROUPING_WINDOW_SECONDS = seconds
+        _log(f"AlertGrouper: grouping window set to {seconds}s")
+
+    def get_config(self) -> dict:
+        """Return current grouping configuration."""
+        return {
+            "grouping_window_seconds": GROUPING_WINDOW_SECONDS,
+            "auto_group_enabled": AUTO_GROUP_ENABLED,
+        }
+
+    def set_auto_group(self, enabled: bool):
+        """Enable or disable automatic alert grouping."""
+        global AUTO_GROUP_ENABLED
+        AUTO_GROUP_ENABLED = enabled
+        _log(f"AlertGrouper: auto-group {'enabled' if enabled else 'disabled'}")
+
+    def process_alert(self, alert: dict):
+        """Process a newly created alert for incident grouping.
+
+        Called from _group_alert() after create_alert().
+
+        Parameters:
+            alert: dict with keys id, severity, category, title, source_host,
+                   source_ip, mitre_technique, timestamp, etc.
+        """
+        if not alert or not alert.get("id"):
+            return
+
+        alert_id = alert["id"]
+        host = alert.get("source_host", "") or alert.get("source_ip", "")
+        mitre_technique = alert.get("mitre_technique", "") or alert.get("mitre_tactic", "")
+
+        # Extract primary technique ID (e.g., "T1110" from "T1110 (Brute Force)")
+        tech_id = self._extract_technique_id(mitre_technique)
+
+        if not host:
+            # Fall back to category-based matching only
+            host = "__no_host__"
+
+        with self._lock:
+            try:
+                # Build search criteria — find open incidents that match
+                window_expr = f"-{GROUPING_WINDOW_SECONDS} seconds"
+
+                # Find open incidents matching host + technique within the window
+                if tech_id:
+                    rows = self.db.execute(
+                        """SELECT id FROM incidents
+                           WHERE status IN ('new', 'investigating')
+                           AND source_host = ?
+                           AND mitre_technique LIKE ?
+                           AND updated_at >= datetime('now', ?)
+                           ORDER BY updated_at DESC LIMIT 1""",
+                        (host, f"%{tech_id}%", window_expr),
+                    ).fetchall()
+                else:
+                    # No MITRE technique — match on host only
+                    rows = self.db.execute(
+                        """SELECT id FROM incidents
+                           WHERE status IN ('new', 'investigating')
+                           AND source_host = ?
+                           AND updated_at >= datetime('now', ?)
+                           ORDER BY updated_at DESC LIMIT 1""",
+                        (host, window_expr),
+                    ).fetchall()
+
+                if rows:
+                    # Add to existing incident
+                    incident_id = rows[0]["id"]
+                    self._add_alert_to_incident(incident_id, alert_id, auto_grouped=True)
+                    self._update_incident_metadata(incident_id, alert)
+                else:
+                    # Create a new incident
+                    self._create_incident_from_alert(alert, tech_id)
+
+            except Exception as e:
+                _log(f"AlertGrouper process_alert error: {e}")
+
+    def _extract_technique_id(self, mitre_text: str) -> str:
+        """Extract MITRE technique ID like 'T1110' from text like 'T1110 (Brute Force)'."""
+        if not mitre_text:
+            return ""
+        m = re.match(r'(T\d{4})', mitre_text.strip())
+        return m.group(1) if m else ""
+
+    def _create_incident_from_alert(self, alert: dict, tech_id: str):
+        """Create a new incident from a single alert's data."""
+        host = alert.get("source_host", "") or alert.get("source_ip", "")
+        severity = alert.get("severity", "medium")
+        category = alert.get("category", "")
+        title = alert.get("title", "")
+        description = alert.get("description", "")
+        mitre_technique = alert.get("mitre_technique", "")
+        mitre_tactic = alert.get("mitre_tactic", "")
+
+        incident_title = f"[{severity.upper()}] {category}: {title[:100]}"
+        incident_desc = (
+            f"Auto-created from alert #{alert['id']}\n"
+            f"Host: {host}\n"
+            f"MITRE: {mitre_technique or 'N/A'}\n"
+            f"Original: {description[:200]}"
+        )
+
+        mitre_label = mitre_technique or mitre_tactic or ""
+
+        cur = self.db.execute(
+            """INSERT INTO incidents
+               (title, description, severity, status, source_host, mitre_technique)
+               VALUES (?, ?, ?, 'new', ?, ?)""",
+            (incident_title, incident_desc, severity, host, mitre_label),
+        )
+        self.db.commit()
+        incident_id = cur.lastrowid
+        self._add_alert_to_incident(incident_id, alert["id"], auto_grouped=True)
+        _log(
+            f"📋 INCIDENT CREATED [{severity.upper()}] '{incident_title}' "
+            f"(id={incident_id}, host={host})"
+        )
+
+    def _add_alert_to_incident(self, incident_id: int, alert_id: int, auto_grouped: bool = False):
+        """Link an alert to an incident in the junction table (idempotent)."""
+        try:
+            self.db.execute(
+                """INSERT OR IGNORE INTO incident_alerts (incident_id, alert_id, auto_grouped)
+                   VALUES (?, ?, ?)""",
+                (incident_id, alert_id, 1 if auto_grouped else 0),
+            )
+            self.db.commit()
+        except Exception as e:
+            _log(f"AlertGrouper _add_alert_to_incident error: {e}")
+
+    def _update_incident_metadata(self, incident_id: int, alert: dict):
+        """Update incident's metadata: severity escalation, alert count, updated_at."""
+        try:
+            severity = alert.get("severity", "medium")
+
+            # Count alerts in incident
+            count_row = self.db.execute(
+                "SELECT COUNT(*) as cnt FROM incident_alerts WHERE incident_id = ?",
+                (incident_id,),
+            ).fetchone()
+            count = count_row["cnt"] if count_row else 0
+
+            # Escalate incident severity if alert severity is higher
+            sev_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+            existing = self.db.execute(
+                "SELECT severity FROM incidents WHERE id = ?", (incident_id,)
+            ).fetchone()
+            current_sev = existing["severity"] if existing else "medium"
+
+            new_sev = current_sev
+            if sev_order.get(severity, 1) > sev_order.get(current_sev, 1):
+                new_sev = severity
+
+            self.db.execute(
+                """UPDATE incidents
+                   SET updated_at = datetime('now'), severity = ?
+                   WHERE id = ?""",
+                (new_sev, incident_id),
+            )
+            self.db.commit()
+        except Exception as e:
+            _log(f"AlertGrouper _update_incident_metadata error: {e}")
+
+    # ── Query methods ──
+
+    def get_incidents(self, status=None, host=None, limit=100, offset=0) -> list[dict]:
+        """List incidents with optional filters."""
+        try:
+            q = "SELECT * FROM incidents WHERE 1=1 "
+            params = []
+            if status:
+                q += "AND status = ? "
+                params.append(status)
+            if host:
+                q += "AND source_host = ? "
+                params.append(host)
+            q += "ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            rows = self.db.execute(q, params).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                # Add alert count
+                cnt = self.db.execute(
+                    "SELECT COUNT(*) as cnt FROM incident_alerts WHERE incident_id = ?",
+                    (d["id"],),
+                ).fetchone()
+                d["alert_count"] = cnt["cnt"] if cnt else 0
+                results.append(d)
+            return results
+        except Exception as e:
+            _log(f"AlertGrouper get_incidents error: {e}")
+            return []
+
+    def get_incident(self, incident_id: int) -> dict | None:
+        """Get a single incident with full details including linked alerts."""
+        try:
+            row = self.db.execute(
+                "SELECT * FROM incidents WHERE id = ?", (incident_id,)
+            ).fetchone()
+            if not row:
+                return None
+            incident = dict(row)
+
+            # Get linked alert IDs
+            alert_rows = self.db.execute(
+                """SELECT a.*, ia.added_at as linked_at, ia.auto_grouped
+                   FROM incident_alerts ia
+                   JOIN alerts a ON ia.alert_id = a.id
+                   WHERE ia.incident_id = ?
+                   ORDER BY a.timestamp DESC""",
+                (incident_id,),
+            ).fetchall()
+            incident["alerts"] = [dict(ar) for ar in alert_rows]
+            incident["alert_count"] = len(alert_rows)
+            return incident
+        except Exception as e:
+            _log(f"AlertGrouper get_incident error: {e}")
+            return None
+
+    def create_incident(self, title: str, alert_ids: list[int] | None = None,
+                        severity: str = "medium", description: str = "",
+                        source_host: str = "", mitre_technique: str = "") -> dict | None:
+        """Manually create a new incident and optionally link alerts."""
+        try:
+            cur = self.db.execute(
+                """INSERT INTO incidents
+                   (title, description, severity, status, source_host, mitre_technique)
+                   VALUES (?, ?, ?, 'new', ?, ?)""",
+                (title, description, severity, source_host, mitre_technique),
+            )
+            self.db.commit()
+            incident_id = cur.lastrowid
+
+            if alert_ids:
+                for aid in alert_ids:
+                    self._add_alert_to_incident(incident_id, aid, auto_grouped=False)
+
+            _log(f"📋 INCIDENT CREATED (manual): '{title}' (id={incident_id})")
+            return self.get_incident(incident_id)
+        except Exception as e:
+            _log(f"AlertGrouper create_incident error: {e}")
+            return None
+
+    def add_alerts_to_incident(self, incident_id: int, alert_ids: list[int]) -> bool:
+        """Manually group alerts into an incident (add alerts to existing incident)."""
+        try:
+            with self._lock:
+                # Verify incident exists
+                existing = self.db.execute(
+                    "SELECT id FROM incidents WHERE id = ?", (incident_id,)
+                ).fetchone()
+                if not existing:
+                    return False
+
+                for aid in alert_ids:
+                    self._add_alert_to_incident(incident_id, aid, auto_grouped=False)
+
+                self.db.execute(
+                    "UPDATE incidents SET updated_at = datetime('now') WHERE id = ?",
+                    (incident_id,),
+                )
+                self.db.commit()
+                _log(f"📋 INCIDENT: {len(alert_ids)} alerts added to incident #{incident_id}")
+                return True
+        except Exception as e:
+            _log(f"AlertGrouper add_alerts_to_incident error: {e}")
+            return False
+
+    def remove_alert_from_incident(self, incident_id: int, alert_id: int) -> bool:
+        """Manually ungroup an alert from an incident."""
+        try:
+            with self._lock:
+                self.db.execute(
+                    "DELETE FROM incident_alerts WHERE incident_id = ? AND alert_id = ?",
+                    (incident_id, alert_id),
+                )
+                self.db.execute(
+                    "UPDATE incidents SET updated_at = datetime('now') WHERE id = ?",
+                    (incident_id,),
+                )
+                self.db.commit()
+                _log(f"📋 INCIDENT: alert #{alert_id} removed from incident #{incident_id}")
+                return True
+        except Exception as e:
+            _log(f"AlertGrouper remove_alert_from_incident error: {e}")
+            return False
+
+    def update_incident_status(self, incident_id: int, status: str) -> bool:
+        """Update incident status and set resolved_at if resolved/closed."""
+        valid_statuses = ("new", "investigating", "escalated", "resolved", "closed")
+        if status not in valid_statuses:
+            return False
+
+        try:
+            if status in ("resolved", "closed"):
+                self.db.execute(
+                    """UPDATE incidents
+                       SET status = ?, resolved_at = datetime('now'), updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (status, incident_id),
+                )
+            else:
+                self.db.execute(
+                    "UPDATE incidents SET status = ?, updated_at = datetime('now') WHERE id = ?",
+                    (status, incident_id),
+                )
+            self.db.commit()
+            _log(f"📋 INCIDENT #{incident_id}: status → {status}")
+            return True
+        except Exception as e:
+            _log(f"AlertGrouper update_incident_status error: {e}")
+            return False
+
+    def get_suggested_groups(self, host=None, lookback_minutes=30) -> list[dict]:
+        """Return suggested alert groupings based on recent ungrouped alerts.
+
+        This is the 'suggestion' path (VAL-CROSS-001) — analyst reviews and confirms.
+
+        Returns:
+            list of {reason, alert_ids, host, mitre_technique, match_score}
+        """
+        try:
+            lookback_expr = f"-{lookback_minutes} minutes"
+            # Find ungrouped alerts (not in any incident)
+            rows = self.db.execute(
+                """SELECT a.* FROM alerts a
+                   WHERE a.timestamp >= datetime('now', ?)
+                   AND a.id NOT IN (SELECT alert_id FROM incident_alerts)
+                   ORDER BY a.timestamp DESC""",
+                (lookback_expr,),
+            ).fetchall()
+
+            alerts = [dict(r) for r in rows]
+            suggestions = []
+
+            # Group by host
+            by_host = {}
+            for a in alerts:
+                h = a.get("source_host", "") or a.get("source_ip", "")
+                if not h:
+                    continue
+                if h not in by_host:
+                    by_host[h] = []
+                by_host[h].append(a)
+
+            for h, host_alerts in by_host.items():
+                if len(host_alerts) < 2:
+                    continue
+                # Group by MITRE technique within this host
+                by_tech = {}
+                for a in host_alerts:
+                    tech = a.get("mitre_technique", "") or a.get("mitre_tactic", "")
+                    tid = self._extract_technique_id(tech)
+                    if not tid:
+                        continue
+                    if tid not in by_tech:
+                        by_tech[tid] = []
+                    by_tech[tid].append(a)
+
+                for tid, tech_alerts in by_tech.items():
+                    if len(tech_alerts) < 2:
+                        continue
+                    alert_ids = [a["id"] for a in tech_alerts[:10]]
+                    match_score = min(100, len(tech_alerts) * 20)
+                    suggestions.append({
+                        "reason": f"Same host ({h}) + MITRE technique ({tid})",
+                        "host": h,
+                        "mitre_technique": tid,
+                        "alert_ids": alert_ids,
+                        "alert_count": len(tech_alerts),
+                        "match_score": match_score,
+                    })
+
+            # Sort by match_score descending
+            suggestions.sort(key=lambda s: s["match_score"], reverse=True)
+            return suggestions[:10]
+
+        except Exception as e:
+            _log(f"AlertGrouper get_suggested_groups error: {e}")
+            return []
+
+    def get_incident_count(self, status=None) -> int:
+        """Return total incident count, optionally filtered by status."""
+        try:
+            if status:
+                row = self.db.execute(
+                    "SELECT COUNT(*) as cnt FROM incidents WHERE status = ?", (status,)
+                ).fetchone()
+            else:
+                row = self.db.execute("SELECT COUNT(*) as cnt FROM incidents").fetchone()
+            return row["cnt"] if row else 0
+        except Exception:
+            return 0
+
+    def get_incident_stats(self) -> dict:
+        """Return incident statistics: counts by status."""
+        try:
+            rows = self.db.execute(
+                """SELECT status, COUNT(*) as cnt
+                   FROM incidents GROUP BY status"""
+            ).fetchall()
+            stats = {"total": 0}
+            for r in rows:
+                stats[r["status"]] = r["cnt"]
+                stats["total"] += r["cnt"]
+            return stats
+        except Exception:
+            return {"total": 0}
+
+
+# ── Alert Grouper singleton ──
+_alert_grouper = None
+_alert_grouper_lock = threading.Lock()
+
+
+def get_alert_grouper():
+    """Return the singleton AlertGrouper, creating it if needed."""
+    global _alert_grouper
+    if _alert_grouper is None:
+        with _alert_grouper_lock:
+            if _alert_grouper is None:
+                _alert_grouper = AlertGrouper(get_db())
+                _log("AlertGrouper initialized")
+    return _alert_grouper
+
+
+# ── Alert export function ──
+def export_alerts(export_format="json", hours=24, severity=None, host=None,
+                  category=None, limit=1000):
+    """Export alerts in JSON or CSV format.
+
+    Returns:
+        tuple of (data_str, content_type, filename)
+    """
+    alerts = get_alerts(hours=hours, severity=severity, limit=limit)
+
+    # Apply post-query filters (host, category) since get_alerts doesn't support them yet
+    if host:
+        alerts = [a for a in alerts
+                  if (a.get("source_host", "") == host or a.get("source_ip", "") == host)]
+    if category:
+        alerts = [a for a in alerts if a.get("category", "") == category]
+
+    if export_format == "csv":
+        import csv
+        import io
+        output = io.StringIO()
+        if alerts:
+            fieldnames = list(alerts[0].keys())
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(alerts)
+        csv_data = output.getvalue()
+        return csv_data, "text/csv", "alerts_export.csv"
+
+    # Default: JSON
+    return json.dumps(alerts, indent=2, default=str), "application/json", "alerts_export.json"
+
+
+# ── Bulk alert acknowledgment ──
+def acknowledge_alerts_bulk(alert_ids: list[int]) -> dict:
+    """Bulk-acknowledge multiple alerts at once.
+
+    Returns:
+        dict with acknowledged_count and failed_ids
+    """
+    acknowledged = 0
+    failed = []
+    try:
+        conn = get_db()
+        for aid in alert_ids:
+            try:
+                conn.execute(
+                    "UPDATE alerts SET acknowledged = 1 WHERE id = ?", (aid,)
+                )
+                acknowledged += 1
+            except Exception:
+                failed.append(aid)
+        conn.commit()
+    except Exception as e:
+        _log(f"acknowledge_alerts_bulk error: {e}")
+        return {"acknowledged_count": 0, "failed_ids": alert_ids}
+
+    return {
+        "acknowledged_count": acknowledged,
+        "failed_ids": failed,
+    }
 
 
 def _collect_local_metrics():
