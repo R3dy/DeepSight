@@ -200,7 +200,7 @@ def v2_status():
                 "hunt": "planned",
                 "iocs": "planned",
                 "dashboards": "planned",
-                "playbooks": "planned",
+                "playbooks": "available",
                 "admin": "planned",
             },
         },
@@ -225,6 +225,7 @@ import routes.v2.detection  # noqa: E402, F401 — registers /detection/ and /si
 import routes.v2.ueba  # noqa: E402, F401 — registers /ueba/ health and model-status routes
 import routes.v2.incidents  # noqa: E402, F401 — registers /incidents/ grouping routes
 import routes.v2.cases  # noqa: E402, F401 — registers /cases/ management routes
+import routes.v2.playbooks  # noqa: E402, F401 — registers /playbooks/ enrichment routes
 
 
 def _ensure_audit_table_lazy():
