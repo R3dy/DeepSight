@@ -40,7 +40,20 @@ if _v2_available and v2_bp is not None:
 
 # ── Initialize SocketIO if available ──
 if _socketio_available:
-    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+    # ── SocketIO event handlers ──
+    @socketio.on('connect')
+    def handle_connect():
+        """Emit a 'connected' event back to the client on successful connection."""
+        from flask import request as sio_request
+        socketio.emit('connected', {'user': 'server'}, to=sio_request.sid)
+
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        """Handle client disconnect (no-op logging placeholder)."""
+        pass
+
 else:
     socketio = None
 
@@ -1213,6 +1226,22 @@ def api_stats():
         result = {"host": SELF_HOST, "timestamp": time.time(), **stats}
         if request.args.get("detail") == "true":
             result["deep"] = collect_deep_data()
+
+        # Emit host_stats via SocketIO for real-time frontend updates
+        if _socketio_available and socketio is not None:
+            try:
+                # Emit a compact version (without deep data) to keep events lean
+                socketio.emit('host_stats', {
+                    "host": SELF_HOST,
+                    "timestamp": time.time(),
+                    "memory": stats.get("memory", {}),
+                    "cpu": stats.get("cpu", {}),
+                    "gpu": stats.get("gpu", {}),
+                    "disks": stats.get("disks", []),
+                })
+            except Exception:
+                pass  # best-effort; don't break the HTTP response
+
         return jsonify(result)
 
     # Remote host — return cached
@@ -1249,6 +1278,20 @@ def api_report():
             "stats": stats,
             "status": "online",
         }
+
+    # Emit host_stats via SocketIO for real-time frontend updates
+    if _socketio_available and socketio is not None:
+        try:
+            socketio.emit('host_stats', {
+                "host": host,
+                "timestamp": time.time(),
+                "memory": stats.get("memory", {}),
+                "cpu": stats.get("cpu", {}),
+                "gpu": stats.get("gpu", {}),
+                "disks": stats.get("disks", []),
+            })
+        except Exception:
+            pass  # best-effort
 
     return jsonify({"status": "ok", "host": host})
 
@@ -1580,6 +1623,11 @@ try:
 except ImportError as e:
     print(f"[server] WARNING: detection module not available: {e}", flush=True)
     DETECTION_AVAILABLE = False
+
+# Wire up SocketIO for real-time alert emission
+if DETECTION_AVAILABLE and _socketio_available and socketio is not None:
+    detection.set_socketio(socketio)
+    print("[server] SocketIO wired to detection engine for real-time alerts", flush=True)
 
 
 @app.route("/api/alerts")

@@ -1037,6 +1037,27 @@ def _is_duplicate(category, source_ip, title, now_epoch=None):
         return False
 
 
+# ── SocketIO callback (set by server.py after import) ──
+_socketio = None
+
+
+def set_socketio(sio):
+    """Register a SocketIO instance for real-time event emission."""
+    global _socketio
+    _socketio = sio
+
+
+def _emit_alert_socketio(alert_dict):
+    """Emit a new_alert event via SocketIO if available."""
+    global _socketio
+    if _socketio is None:
+        return
+    try:
+        _socketio.emit('new_alert', alert_dict)
+    except Exception:
+        pass  # best-effort; don't break alert creation
+
+
 def _correlate_alert(alert_dict):
     """Feed a newly created alert into the correlation engine if available."""
     try:
@@ -1082,6 +1103,8 @@ def create_alert(severity, category, title, description="", source_host="",
         _dispatch_notification(alert_dict)
         # Feed to correlation engine (non-blocking, thread-safe)
         _correlate_alert(alert_dict)
+        # Emit via SocketIO for real-time frontend updates
+        _emit_alert_socketio(alert_dict)
         return alert_dict
     except Exception as e:
         _log(f"Error creating alert: {e}")
