@@ -4610,7 +4610,11 @@ function updateAnomalyTimelineChart(baselines) {
 }
 
 function updateAnomalyTimelineFromEvents(anomalies) {
-  if (!chartAnomalyTimeline || !anomalies.length) return;
+  if (!chartAnomalyTimeline) return;
+  if (!anomalies.length) {
+    chartAnomalyTimeline._hasEventData = false;
+    return;
+  }
 
   chartAnomalyTimeline._hasEventData = true;
 
