@@ -2872,7 +2872,7 @@ BASELINE_METRICS = [
 
 
 class BaselineEngine:
-    """Rolling z-score statistical baselining using Welford's online algorithm.
+    """Rolling z-score statistical baselining via batch recomputation.
 
     Maintains per-host rolling statistics for key system metrics.
     Uses a deque of recent samples (pruned to BASELINE_WINDOW_SECONDS)
@@ -2937,7 +2937,7 @@ class BaselineEngine:
     def update(self, host, metric, value, timestamp=None):
         """Add a sample and return (z_score, mean, stddev, is_learning).
 
-        Returns (None, value, 0, True) if insufficient data.
+        Returns None if insufficient data (< 2 samples in window).
         """
         if timestamp is None:
             timestamp = time.time()
@@ -2953,18 +2953,23 @@ class BaselineEngine:
             count = len(samples)
             if count < 2:
                 self._save_state(host, metric, count, value, 0, 0, value, timestamp, True)
-                return (None, value, 0, True)
+                return None
 
             # Compute mean and stddev from window samples
             vals = [v for _, v in samples]
             mean = sum(vals) / count
             variance = sum((v - mean) ** 2 for v in vals) / count
-            stddev = math.sqrt(variance) if variance > 1e-9 else 0.001
+
+            # Guard on variance (not stddev) to avoid false positives on stable data.
+            # When variance is near-zero, there is no real deviation — force z=0.
+            if variance > 1e-9:
+                stddev = math.sqrt(variance)
+                z_score = (float(value) - mean) / stddev
+            else:
+                stddev = 0.0
+                z_score = 0.0
 
             is_learning = count < BASELINE_LEARNING_SAMPLES
-
-            # Z-score
-            z_score = (float(value) - mean) / stddev if stddev > 1e-9 else 0.0
 
             # Persist to DB
             self._save_state(host, metric, count, mean, variance, stddev, value,
@@ -3053,6 +3058,8 @@ class BaselineEngine:
     def get_baselines(self, host=None):
         """Return current baseline state for one or all hosts."""
         results = []
+        mem_keys = set()
+
         with self.lock:
             for h, metrics in self.samples.items():
                 if host and h != host:
@@ -3071,6 +3078,7 @@ class BaselineEngine:
                     is_learning = count < BASELINE_LEARNING_SAMPLES
                     z = (last_val - mean) / stddev if stddev > 1e-9 else 0.0
 
+                    mem_keys.add((h, metric))
                     results.append({
                         "host": h,
                         "metric": metric,
@@ -3084,24 +3092,34 @@ class BaselineEngine:
                         "threshold": BASELINE_Z_THRESHOLDS.get(metric, BASELINE_Z_THRESHOLD),
                     })
 
-        # Also include persisted baselines that might not be in memory yet
+        # Also include persisted baselines that might not be in memory yet.
+        # Lock is released before DB queries to avoid holding it during I/O.
         try:
             rows = self.db.execute(
                 "SELECT * FROM baselines ORDER BY host, metric"
             ).fetchall()
-            mem_keys = {(r["host"], r["metric"]) for r in results}
             for r in rows:
                 if (r["host"], r["metric"]) not in mem_keys:
+                    # Compute z-score from persisted values instead of hardcoding 0.0
+                    r_mean = r["mean"]
+                    r_stddev = r["stddev"]
+                    r_last = r["last_value"]
+                    is_learning = bool(r["is_learning"])
+                    if r_stddev > 1e-9 and not is_learning:
+                        z_db = (r_last - r_mean) / r_stddev
+                    else:
+                        z_db = 0.0
+
                     results.append({
                         "host": r["host"],
                         "metric": r["metric"],
                         "label": BASELINE_METRIC_LABELS.get(r["metric"], r["metric"]),
                         "count": r["count"],
-                        "mean": round(r["mean"], 2),
-                        "stddev": round(r["stddev"], 2),
-                        "current_value": round(r["last_value"], 2),
-                        "z_score": 0.0,
-                        "is_learning": bool(r["is_learning"]),
+                        "mean": round(r_mean, 2),
+                        "stddev": round(r_stddev, 2),
+                        "current_value": round(r_last, 2),
+                        "z_score": round(z_db, 3),
+                        "is_learning": is_learning,
                         "threshold": BASELINE_Z_THRESHOLDS.get(r["metric"], BASELINE_Z_THRESHOLD),
                     })
         except Exception:
