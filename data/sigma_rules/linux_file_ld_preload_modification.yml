@@ -1,0 +1,19 @@
+title: LD_PRELOAD Configuration Modification
+id: 10d1e2f3-a4b5-c6d7-e8f9-a0b1c2d3e4f5
+status: stable
+description: Detects modification of LD_PRELOAD or ld.so.preload
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.privilege_escalation
+  - attack.t1574.006
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|contains: 'ld.so.preload'
+  condition: selection
+falsepositives:
+  - Software requiring library preloading
+level: high

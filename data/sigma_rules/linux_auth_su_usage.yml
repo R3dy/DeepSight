@@ -1,0 +1,19 @@
+title: Su Command Usage
+id: 34d5e6f7-a8b9-c0d1-e2f3-a4b5c6d7e8f9
+status: stable
+description: Detects su command usage for user switching
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003
+logsource:
+  category: authentication
+  product: linux
+detection:
+  selection:
+    event_type: su
+  condition: selection
+falsepositives:
+  - Administrators switching users
+level: low

@@ -1,0 +1,20 @@
+title: Reverse Shell via PHP fsockopen
+id: c9d1e5f6-2b4a-5c7d-0e8f-1a3c5d7e9f1b
+status: stable
+description: Detects PHP reverse shell using fsockopen
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/php'
+    CommandLine|contains: 'fsockopen'
+  condition: selection
+falsepositives:
+  - Legitimate PHP applications making socket connections
+level: critical

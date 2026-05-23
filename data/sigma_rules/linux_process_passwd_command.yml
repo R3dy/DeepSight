@@ -1,0 +1,19 @@
+title: Password Change via passwd Command
+id: 28d9e0f1-a2b3-c4d5-e6f7-a8b9c0d1e2f3
+status: stable
+description: Detects user password changes
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.persistence
+  - attack.t1098
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/passwd'
+  condition: selection
+falsepositives:
+  - Legitimate password changes by users
+level: low

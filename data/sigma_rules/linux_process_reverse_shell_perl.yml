@@ -1,0 +1,20 @@
+title: Reverse Shell via Perl
+id: d4f7b3a1-8e2c-4f5d-9a6b-1c3d5e7f9a2b
+status: stable
+description: Detects Perl reverse shell using socket module
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/perl'
+    CommandLine|contains: 'socket'
+  condition: selection
+falsepositives:
+  - Legitimate Perl network applications
+level: critical

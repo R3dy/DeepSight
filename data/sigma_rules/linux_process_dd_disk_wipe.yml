@@ -1,0 +1,22 @@
+title: Disk Wipe Using dd
+id: 13a4b5c6-d7e8-f9a0-b1c2-d3e4f5a6b7c8
+status: stable
+description: Detects disk wiping using the dd command
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.impact
+  - attack.t1485
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/dd'
+    CommandLine|contains:
+      - 'if=/dev/zero'
+      - 'if=/dev/urandom'
+  condition: selection
+falsepositives:
+  - None expected
+level: critical

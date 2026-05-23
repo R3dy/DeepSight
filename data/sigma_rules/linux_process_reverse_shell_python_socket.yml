@@ -1,0 +1,20 @@
+title: Reverse Shell via Python Socket
+id: 8e3a4d3f-5e8c-4a91-84b7-2e0b6e5ed17a
+status: stable
+description: Detects Python reverse shell using socket module
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/python3'
+    CommandLine|contains: 'socket.'
+  condition: selection
+falsepositives:
+  - Legitimate Python network applications
+level: critical

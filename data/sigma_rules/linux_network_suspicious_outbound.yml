@@ -1,0 +1,27 @@
+title: Suspicious Outbound Network Connection
+id: 36f7a8b9-c0d1-e2f3-a4b5-c6d7e8f9a0b1
+status: stable
+description: Detects suspicious outbound connections to uncommon ports
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.command_and_control
+  - attack.t1071
+logsource:
+  category: network_connection
+  product: linux
+detection:
+  selection:
+    DestinationPort:
+      - 4444
+      - 5555
+      - 6666
+      - 7777
+      - 8888
+      - 9999
+      - 1337
+      - 31337
+  condition: selection
+falsepositives:
+  - Development servers on higher ports
+level: high

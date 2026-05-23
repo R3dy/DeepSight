@@ -1,0 +1,28 @@
+title: Web Server Spawning Shell Process
+id: a2b3c4d5-1e2f-3a4b-5c6d-7e8f9a0b1c2d
+status: stable
+description: Detects web server processes spawning shell interpreters
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.persistence
+  - attack.t1505.003
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    ParentImage|contains:
+      - 'apache2'
+      - 'nginx'
+      - 'httpd'
+      - 'lighttpd'
+    Image|endswith:
+      - '/bash'
+      - '/sh'
+      - '/dash'
+      - '/zsh'
+  condition: selection
+falsepositives:
+  - CGI scripts legitimately spawning shell processes
+level: critical

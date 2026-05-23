@@ -1,0 +1,19 @@
+title: Background Process via nohup
+id: 52d3e4f5-a6b7-c8d9-e0f1-a2b3c4d5e6f7
+status: stable
+description: Detects nohup used to background suspicious processes
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.persistence
+  - attack.t1053
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains: 'nohup'
+  condition: selection
+falsepositives:
+  - Long-running tasks in background
+level: low

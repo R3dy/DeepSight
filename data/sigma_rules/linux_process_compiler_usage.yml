@@ -1,0 +1,26 @@
+title: Compiler Usage in Suspicious Context
+id: 54f5a6b7-c8d9-e0f1-a2b3-c4d5e6f7a8b9
+status: stable
+description: Detects gcc/g++ usage from suspicious processes
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+      - '/gcc'
+      - '/g++'
+      - '/make'
+    ParentImage|contains:
+      - 'www-data'
+      - 'apache'
+      - 'nginx'
+  condition: selection
+falsepositives:
+  - Automated build systems
+level: high

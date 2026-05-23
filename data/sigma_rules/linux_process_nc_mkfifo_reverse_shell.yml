@@ -1,0 +1,21 @@
+title: Netcat FIFO Reverse Shell
+id: e0d2f6a7-3c5b-6d8e-1f9a-2b4d6e8f0a2c
+status: stable
+description: Detects netcat FIFO-based reverse shell (mkfifo + nc)
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - 'mkfifo'
+      - 'nc '
+  condition: selection
+falsepositives:
+  - None expected
+level: critical

@@ -1,0 +1,20 @@
+title: Base64 Encoded Command Execution
+id: b3c4d5e6-2f3a-4b5c-6d7e-8f9a0b1c2d3e
+status: stable
+description: Detects execution of base64 encoded commands via bash
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.defense_evasion
+  - attack.t1027
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains: 'base64'
+    CommandLine|contains: '-d'
+  condition: selection
+falsepositives:
+  - Legitimate use of base64 decoding in scripts
+level: medium

@@ -1,0 +1,19 @@
+title: Suspicious Named Pipe Creation
+id: 31a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c6
+status: stable
+description: Detects suspicious named pipe or fifo creation
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/mkfifo'
+  condition: selection
+falsepositives:
+  - IPC mechanisms in applications
+level: low

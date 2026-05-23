@@ -1,0 +1,20 @@
+title: Git Clone to Suspicious Directory
+id: 44b5c6d7-e8f9-a0b1-c2d3-e4f5a6b7c8d9
+status: stable
+description: Detects git clone operations to suspicious directories
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1204
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/git'
+    CommandLine|contains: 'clone'
+  condition: selection
+falsepositives:
+  - Developers cloning repositories
+level: low

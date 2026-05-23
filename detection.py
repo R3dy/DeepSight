@@ -40,6 +40,20 @@ try:
 except ImportError:
     HAS_THREAT_INTEL = False
 
+# ── Sigma rule engine ──
+try:
+    from sigma_engine import evaluate_sigma, get_sigma_engine
+    from routes.v2.detection import update_collector_health as _update_collector_health
+    HAS_SIGMA = True
+except ImportError:
+    HAS_SIGMA = False
+    def evaluate_sigma(event):
+        return []
+    def get_sigma_engine():
+        return None
+    def _update_collector_health(*args, **kwargs):
+        pass
+
 # ── Optional imports ──
 HAS_PSUTIL = True
 
@@ -1118,6 +1132,45 @@ def evaluate_rules(event_type, data):
     """
     alerts = []
 
+    # ── Run Sigma rule evaluation against this event ──
+    if HAS_SIGMA:
+        try:
+            # Normalize event field names for Sigma compatibility
+            sigma_event = dict(data)
+            # Map common field name variations
+            _FIELD_ALIASES = {
+                'cmdline': 'CommandLine',
+                'process_name': 'Image',
+                'exe_path': 'Image',
+                'image': 'Image',
+                'command_line': 'CommandLine',
+            }
+            for src, dst in _FIELD_ALIASES.items():
+                if src in sigma_event and dst not in sigma_event:
+                    sigma_event[dst] = sigma_event[src]
+            # Ensure event_type is set for logsource filtering
+            if 'event_type' not in sigma_event:
+                sigma_event['event_type'] = event_type
+            sigma_matches = evaluate_sigma(sigma_event)
+            for match in sigma_matches:
+                a = create_alert(
+                    severity=match.get('severity', 'medium'),
+                    category=match.get('category', 'sigma'),
+                    title=match.get('title', 'Sigma Rule Match'),
+                    description=match.get('description', ''),
+                    source_ip=data.get('source_ip', ''),
+                    source_host=data.get('source_host', ''),
+                    mitre_tactic=match.get('mitre_tactic', ''),
+                    mitre_technique=match.get('mitre_technique', ''),
+                    process_pid=data.get('pid'),
+                    process_name=data.get('process_name', ''),
+                    raw_data=match.get('raw_data', {}),
+                )
+                if a:
+                    alerts.append(a)
+        except Exception:
+            pass  # Sigma evaluation is best-effort
+
     if event_type == "ssh_brute_force":
         ip = data.get("source_ip", "")
         count = data.get("count", 0)
@@ -1440,6 +1493,8 @@ def process_audit_collector():
     """Poll /proc for new processes and scan them for suspicious behaviour."""
     _log("process_audit_collector started (interval={}s)".format(INTERVAL_PROCESS_AUDIT))
     global _seen_pids
+    if HAS_SIGMA:
+        _update_collector_health('process_audit', 'running')
 
     while True:
         try:
@@ -1819,6 +1874,8 @@ def beaconing_collector():
     """Analyze outbound connection timing for C2 beaconing patterns."""
     _log("beaconing_collector started (interval={}s, window={}s)".format(
         INTERVAL_BEACONING, BEACONING_WINDOW_S))
+    if HAS_SIGMA:
+        _update_collector_health('beaconing', 'running')
 
     while True:
         try:
@@ -2076,6 +2133,8 @@ def _parse_auth_line(line):
 def auth_monitor():
     """Monitor /var/log/auth.log for authentication events."""
     _log("auth_monitor started (interval={}s)".format(INTERVAL_AUTH_MONITOR))
+    if HAS_SIGMA:
+        _update_collector_health('auth_monitor', 'running')
     AUTH_LOG = "/var/log/auth.log"
 
     # Check access
@@ -2159,6 +2218,8 @@ def auth_monitor():
 def dns_collector():
     """Monitor DNS activity via systemd-resolved statistics and syslog."""
     _log("dns_collector started (interval={}s)".format(INTERVAL_DNS))
+    if HAS_SIGMA:
+        _update_collector_health('dns', 'running')
 
     # DGA-like TLDs (common in algorithmically generated domains)
     _dga_tlds = {".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".club",
@@ -2268,6 +2329,8 @@ WATCH_TMP_DIR = "/tmp"
 def file_integrity_collector():
     """Watch sensitive files for modification using inotify (or polling fallback)."""
     _log("file_integrity_collector started")
+    if HAS_SIGMA:
+        _update_collector_health('file_integrity', 'running')
 
     if HAS_INOTIFY:
         _file_integrity_inotify()
@@ -3892,6 +3955,8 @@ def baseline_collector():
     """Background thread: collect metrics every BASELINE_COLLECT_INTERVAL seconds,
     update baselines, and fire anomaly alerts."""
     global _prev_disk_io
+    if HAS_SIGMA:
+        _update_collector_health('baseline', 'running')
     _log(f"baseline_collector started (interval={BASELINE_COLLECT_INTERVAL}s, "
          f"window={BASELINE_WINDOW_SECONDS}s, learning={BASELINE_LEARNING_SAMPLES})")
 
@@ -3994,9 +4059,20 @@ def start_collectors():
     # Initialize baseline engine early (creates tables)
     get_baseline_engine()
 
+    # Initialize Sigma engine
+    if HAS_SIGMA:
+        try:
+            get_sigma_engine()
+            _update_collector_health('packet_sniffer', 'running')
+            _log('SigmaEngine initialized successfully')
+        except Exception as e:
+            _log(f'SigmaEngine init error: {e}')
+
     # Initialize and start correlation engine
     correl = get_correlation_engine()
     correl.start()
+    if HAS_SIGMA:
+        _update_collector_health('correlation', 'running')
 
     collectors = [
         ("process_audit", process_audit_collector),

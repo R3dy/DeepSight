@@ -1,0 +1,23 @@
+title: Suspicious Archive Extraction
+id: 24f5a6b7-c8d9-e0f1-a2b3-c4d5e6f7a8b9
+status: stable
+description: Detects extraction of archives from suspicious locations
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+      - '/tar'
+      - '/unzip'
+      - '/gunzip'
+    CommandLine|contains: '/tmp/'
+  condition: selection
+falsepositives:
+  - Software installations using /tmp
+level: low

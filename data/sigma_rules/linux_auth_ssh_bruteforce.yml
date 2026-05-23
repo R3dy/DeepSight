@@ -1,0 +1,20 @@
+title: SSH Brute Force Attack
+id: 32b3c4d5-e6f7-a8b9-c0d1-e2f3a4b5c6d7
+status: stable
+description: Detects SSH brute force attempts via multiple failed logins
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.credential_access
+  - attack.t1110.001
+logsource:
+  category: authentication
+  product: linux
+detection:
+  selection:
+    event_type: ssh_fail
+  timeframe: 10s
+  condition: selection | count() > 5
+falsepositives:
+  - Users forgetting passwords
+level: critical
