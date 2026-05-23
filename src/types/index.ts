@@ -405,3 +405,39 @@ export interface ApiError {
 export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; status: number };
+
+// ── MITRE ATT&CK Coverage ──
+export interface AttackTechnique {
+  id: string;
+  name: string;
+  covered: boolean;
+  rules: string[];
+}
+
+export interface AttackTacticCoverage {
+  tactic: string;
+  tactic_id: string;
+  techniques: AttackTechnique[];
+  technique_count: number;
+  covered_count: number;
+  uncovered_count: number;
+  coverage_pct: number;
+}
+
+export interface CoverageGap {
+  technique_id: string;
+  technique_name: string;
+  tactic: string;
+  tactic_id: string;
+  recommendation: string;
+}
+
+export interface AttackCoverageData {
+  tactics: AttackTacticCoverage[];
+  gaps: CoverageGap[];
+  overall_coverage_pct: number;
+  total_techniques: number;
+  total_covered: number;
+  total_uncovered: number;
+  generated_at: string;
+}

@@ -132,6 +132,405 @@ DGA_TOOL_PATTERNS = [
 ]
 
 # ═══════════════════════════════════════════
+# MITRE ATT&CK Framework — Tactics & Techniques
+# ═══════════════════════════════════════════
+
+# Comprehensive MITRE ATT&CK Enterprise matrix (v15.1).
+# Only the most commonly detected techniques are listed here for coverage analysis;
+# the full framework has 200+ techniques but this covers the detection-relevant subset.
+
+MITRE_ATTACK_FRAMEWORK = {
+    "Reconnaissance": {
+        "id": "TA0043",
+        "techniques": [
+            ("T1595", "Active Scanning"),
+            ("T1592", "Gather Victim Host Information"),
+            ("T1589", "Gather Victim Identity Information"),
+            ("T1590", "Gather Victim Network Information"),
+            ("T1591", "Gather Victim Org Information"),
+            ("T1598", "Phishing for Information"),
+            ("T1597", "Search Closed Sources"),
+            ("T1596", "Search Open Technical Databases"),
+            ("T1593", "Search Open Websites/Domains"),
+            ("T1594", "Search Victim-Owned Websites"),
+        ],
+    },
+    "Resource Development": {
+        "id": "TA0042",
+        "techniques": [
+            ("T1583", "Acquire Infrastructure"),
+            ("T1586", "Compromise Accounts"),
+            ("T1584", "Compromise Infrastructure"),
+            ("T1587", "Develop Capabilities"),
+            ("T1585", "Establish Accounts"),
+            ("T1588", "Obtain Capabilities"),
+            ("T1608", "Stage Capabilities"),
+        ],
+    },
+    "Initial Access": {
+        "id": "TA0001",
+        "techniques": [
+            ("T1189", "Drive-by Compromise"),
+            ("T1190", "Exploit Public-Facing Application"),
+            ("T1133", "External Remote Services"),
+            ("T1200", "Hardware Additions"),
+            ("T1566", "Phishing"),
+            ("T1091", "Replication Through Removable Media"),
+            ("T1195", "Supply Chain Compromise"),
+            ("T1199", "Trusted Relationship"),
+            ("T1078", "Valid Accounts"),
+        ],
+    },
+    "Execution": {
+        "id": "TA0002",
+        "techniques": [
+            ("T1059", "Command and Scripting Interpreter"),
+            ("T1559", "Inter-Process Communication"),
+            ("T1204", "User Execution"),
+            ("T1047", "Windows Management Instrumentation"),
+            ("T1609", "Container Administration Command"),
+            ("T1610", "Deploy Container"),
+            ("T1053", "Scheduled Task/Job"),
+            ("T1129", "Shared Modules"),
+        ],
+    },
+    "Persistence": {
+        "id": "TA0003",
+        "techniques": [
+            ("T1547", "Boot or Logon Autostart Execution"),
+            ("T1136", "Create Account"),
+            ("T1543", "Create or Modify System Process"),
+            ("T1505", "Server Software Component"),
+            ("T1053", "Scheduled Task/Job"),
+            ("T1078", "Valid Accounts"),
+            ("T1525", "Implant Internal Image"),
+        ],
+    },
+    "Privilege Escalation": {
+        "id": "TA0004",
+        "techniques": [
+            ("T1548", "Abuse Elevation Control Mechanism"),
+            ("T1134", "Access Token Manipulation"),
+            ("T1547", "Boot or Logon Autostart Execution"),
+            ("T1053", "Scheduled Task/Job"),
+            ("T1068", "Exploitation for Privilege Escalation"),
+            ("T1078", "Valid Accounts"),
+        ],
+    },
+    "Defense Evasion": {
+        "id": "TA0005",
+        "techniques": [
+            ("T1548", "Abuse Elevation Control Mechanism"),
+            ("T1140", "Deobfuscate/Decode Files or Information"),
+            ("T1222", "File and Directory Permissions Modification"),
+            ("T1564", "Hide Artifacts"),
+            ("T1070", "Indicator Removal"),
+            ("T1036", "Masquerading"),
+            ("T1556", "Modify Authentication Process"),
+            ("T1027", "Obfuscated Files or Information"),
+            ("T1055", "Process Injection"),
+            ("T1218", "System Binary Proxy Execution"),
+            ("T1202", "Indirect Command Execution"),
+        ],
+    },
+    "Credential Access": {
+        "id": "TA0006",
+        "techniques": [
+            ("T1110", "Brute Force"),
+            ("T1555", "Credentials from Password Stores"),
+            ("T1212", "Exploitation for Credential Access"),
+            ("T1056", "Input Capture"),
+            ("T1557", "Man-in-the-Middle"),
+            ("T1040", "Network Sniffing"),
+            ("T1003", "OS Credential Dumping"),
+            ("T1528", "Steal Application Access Token"),
+            ("T1539", "Steal Web Session Cookie"),
+            ("T1111", "Multi-Factor Authentication Interception"),
+        ],
+    },
+    "Discovery": {
+        "id": "TA0007",
+        "techniques": [
+            ("T1087", "Account Discovery"),
+            ("T1010", "Application Window Discovery"),
+            ("T1083", "File and Directory Discovery"),
+            ("T1046", "Network Service Discovery"),
+            ("T1135", "Network Share Discovery"),
+            ("T1069", "Permission Groups Discovery"),
+            ("T1057", "Process Discovery"),
+            ("T1018", "Remote System Discovery"),
+            ("T1518", "Software Discovery"),
+            ("T1082", "System Information Discovery"),
+            ("T1016", "System Network Configuration Discovery"),
+            ("T1049", "System Network Connections Discovery"),
+            ("T1033", "System Owner/User Discovery"),
+            ("T1124", "System Time Discovery"),
+        ],
+    },
+    "Lateral Movement": {
+        "id": "TA0008",
+        "techniques": [
+            ("T1210", "Exploitation of Remote Services"),
+            ("T1534", "Internal Spearphishing"),
+            ("T1021", "Remote Services"),
+            ("T1091", "Replication Through Removable Media"),
+            ("T1080", "Taint Shared Content"),
+            ("T1550", "Use Alternate Authentication Material"),
+        ],
+    },
+    "Collection": {
+        "id": "TA0009",
+        "techniques": [
+            ("T1560", "Archive Collected Data"),
+            ("T1119", "Automated Collection"),
+            ("T1005", "Data from Local System"),
+            ("T1039", "Data from Network Shared Drive"),
+            ("T1025", "Data from Removable Media"),
+            ("T1074", "Data Staged"),
+            ("T1114", "Email Collection"),
+            ("T1056", "Input Capture"),
+            ("T1213", "Data from Information Repositories"),
+        ],
+    },
+    "Command and Control": {
+        "id": "TA0011",
+        "techniques": [
+            ("T1071", "Application Layer Protocol"),
+            ("T1092", "Communication Through Removable Media"),
+            ("T1132", "Data Encoding"),
+            ("T1001", "Data Obfuscation"),
+            ("T1568", "Dynamic Resolution"),
+            ("T1573", "Encrypted Channel"),
+            ("T1008", "Fallback Channels"),
+            ("T1105", "Ingress Tool Transfer"),
+            ("T1104", "Multi-Stage Channels"),
+            ("T1095", "Non-Application Layer Protocol"),
+            ("T1571", "Non-Standard Port"),
+            ("T1572", "Protocol Tunneling"),
+            ("T1090", "Proxy"),
+            ("T1219", "Remote Access Software"),
+            ("T1205", "Traffic Signaling"),
+            ("T1102", "Web Service"),
+        ],
+    },
+    "Exfiltration": {
+        "id": "TA0010",
+        "techniques": [
+            ("T1020", "Automated Exfiltration"),
+            ("T1030", "Data Transfer Size Limits"),
+            ("T1048", "Exfiltration Over Alternative Protocol"),
+            ("T1041", "Exfiltration Over C2 Channel"),
+            ("T1011", "Exfiltration Over Other Network Medium"),
+            ("T1052", "Exfiltration Over Physical Medium"),
+            ("T1567", "Exfiltration Over Web Service"),
+            ("T1029", "Scheduled Transfer"),
+        ],
+    },
+    "Impact": {
+        "id": "TA0040",
+        "techniques": [
+            ("T1531", "Account Access Removal"),
+            ("T1485", "Data Destruction"),
+            ("T1486", "Data Encrypted for Impact"),
+            ("T1565", "Data Manipulation"),
+            ("T1491", "Defacement"),
+            ("T1561", "Disk Wipe"),
+            ("T1499", "Endpoint Denial of Service"),
+            ("T1495", "Firmware Corruption"),
+            ("T1490", "Inhibit System Recovery"),
+            ("T1498", "Network Denial of Service"),
+            ("T1496", "Resource Hijacking"),
+            ("T1489", "Service Stop"),
+            ("T1529", "System Shutdown/Reboot"),
+        ],
+    },
+}
+
+
+def _collect_mitre_techniques_from_rules():
+    """Collect all MITRE technique IDs referenced by enabled detection rules.
+
+    Sources:
+    1. Sigma rules (from sigma_engine) — primary detection rule source
+    2. Historical alerts — techniques that have generated alerts
+    3. Known built-in rule techniques — extracted from detection.py code patterns
+    """
+    covered = {}  # technique_id -> {"rules": [rule_names], "tactic": tactic_name}
+
+    # Helper: parse technique ID from various formats
+    def parse_tech_id(raw):
+        """Extract technique ID like T1059 from formats like 'T1059', 'T1059.001', 'T1059 (Command...)'."""
+        if not raw:
+            return None
+        m = re.match(r'(T\d{4})(?:\.\d{3})?', str(raw).strip())
+        return m.group(1) if m else None
+
+    # ── Sigma rules (primary source) ──
+    try:
+        if HAS_SIGMA:
+            engine = get_sigma_engine()
+            for rule in engine.get_all_rules():
+                if not rule.get("enabled", True):
+                    continue
+                rule_name = rule.get("title", rule.get("id", "unknown"))
+                rule_tactics = rule.get("mitre_tactics", [])
+                for tech_raw in rule.get("mitre_techniques", []):
+                    tech = parse_tech_id(tech_raw)
+                    if tech:
+                        if tech not in covered:
+                            covered[tech] = {"rules": [], "tactic": rule_tactics[0] if rule_tactics else "Unknown"}
+                        if rule_name not in covered[tech]["rules"]:
+                            covered[tech]["rules"].append(rule_name)
+    except Exception as e:
+        _log(f"MITRE coverage: error collecting sigma techniques: {e}")
+
+    # ── Historical alerts (shows which techniques have actually fired) ──
+    try:
+        conn = get_db()
+        rows = conn.execute("""
+            SELECT DISTINCT mitre_technique, mitre_tactic
+            FROM alerts
+            WHERE mitre_technique IS NOT NULL AND mitre_technique != ''
+            LIMIT 500
+        """).fetchall()
+        for row in rows:
+            tech = parse_tech_id(row["mitre_technique"])
+            if tech and tech not in covered:
+                covered[tech] = {
+                    "rules": ["built-in detection rule"],
+                    "tactic": row["mitre_tactic"] or "Unknown",
+                }
+    except Exception as e:
+        _log(f"MITRE coverage: error collecting alert techniques: {e}")
+
+    return covered
+
+
+def get_attack_coverage():
+    """Return MITRE ATT&CK coverage data: all techniques, coverage status,
+    percentages per tactic, rule mappings, and gap analysis.
+
+    Returns a dict suitable for the /api/attack-coverage endpoint.
+    """
+    try:
+        covered = _collect_mitre_techniques_from_rules()
+
+        tactics = []
+        total_techniques = 0
+        total_covered = 0
+
+        for tactic_name, tactic_data in MITRE_ATTACK_FRAMEWORK.items():
+            techniques = []
+            tactic_covered = 0
+            for tech_id, tech_name in tactic_data["techniques"]:
+                is_covered = tech_id in covered
+                rules = covered.get(tech_id, {}).get("rules", [])
+                if is_covered:
+                    tactic_covered += 1
+                techniques.append({
+                    "id": tech_id,
+                    "name": tech_name,
+                    "covered": is_covered,
+                    "rules": rules,
+                })
+
+            technique_count = len(techniques)
+            coverage_pct = round(tactic_covered / technique_count * 100, 1) if technique_count > 0 else 0
+            total_techniques += technique_count
+            total_covered += tactic_covered
+
+            tactics.append({
+                "tactic": tactic_name,
+                "tactic_id": tactic_data["id"],
+                "techniques": techniques,
+                "technique_count": technique_count,
+                "covered_count": tactic_covered,
+                "uncovered_count": technique_count - tactic_covered,
+                "coverage_pct": coverage_pct,
+            })
+
+        overall_pct = round(total_covered / total_techniques * 100, 1) if total_techniques > 0 else 0
+
+        # ── Gap Analysis: uncovered techniques with recommendations ──
+        gaps = []
+        for tactic in tactics:
+            for t in tactic["techniques"]:
+                if not t["covered"]:
+                    gaps.append({
+                        "technique_id": t["id"],
+                        "technique_name": t["name"],
+                        "tactic": tactic["tactic"],
+                        "tactic_id": tactic["tactic_id"],
+                        "recommendation": _get_coverage_recommendation(t["id"], t["name"], tactic["tactic"]),
+                    })
+
+        return {
+            "tactics": tactics,
+            "gaps": gaps,
+            "overall_coverage_pct": overall_pct,
+            "total_techniques": total_techniques,
+            "total_covered": total_covered,
+            "total_uncovered": total_techniques - total_covered,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    except Exception as e:
+        _log(f"get_attack_coverage error: {e}")
+        return {
+            "tactics": [],
+            "gaps": [],
+            "overall_coverage_pct": 0,
+            "total_techniques": 0,
+            "total_covered": 0,
+            "total_uncovered": 0,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+
+def _get_coverage_recommendation(tech_id, tech_name, tactic):
+    """Get a human-readable recommendation for covering an un-covered technique."""
+    recs = {
+        "T1595": "Deploy network scanning detection rules to alert on port scans and service enumeration.",
+        "T1592": "Monitor for commands that enumerate system information (hostname, uname, /proc/cpuinfo reads).",
+        "T1190": "Ensure web server logs are monitored for exploit attempts; enable WAF rules in Sigma format.",
+        "T1566": "Deploy email gateway logs to the SIEM; create Sigma rules for suspicious attachment types.",
+        "T1078": "Monitor for unusual login patterns: off-hours access, impossible travel, new IPs per user.",
+        "T1548": "Track sudo usage and privilege escalation attempts via auth logs.",
+        "T1055": "Enable auditd monitoring for ptrace and process injection syscalls.",
+        "T1027": "Deploy file entropy analysis to detect obfuscated/packed binaries.",
+        "T1555": "Monitor access to shadow files, password stores, and credential files.",
+        "T1003": "Watch for access to /etc/shadow, memory dump tools, and mimikatz-like behavior.",
+        "T1040": "Monitor for promiscuous mode interfaces; detect tcpdump/wireshark execution.",
+        "T1210": "Monitor for lateral movement via SSH, WinRM, or SMB connection patterns.",
+        "T1021": "Track SSH/RDP connection chains; alert on unusual lateral movement patterns.",
+        "T1485": "Monitor for mass file deletion, shred/wipe commands, and filesystem destruction.",
+        "T1486": "Detect ransomware-like behavior: rapid file encryption, ransom note creation.",
+        "T1498": "Monitor for volumetric network traffic anomalies and DDoS patterns.",
+        "T1496": "Detect cryptominer processes via CPU usage patterns and known mining pools.",
+    }
+    if tech_id in recs:
+        return recs[tech_id]
+
+    # Generic recommendation by tactic
+    tactic_recs = {
+        "Reconnaissance": f"Create Sigma rules to detect {tech_name} ({tech_id}) activity via network and host telemetry.",
+        "Resource Development": f"Monitor for infrastructure staging indicators related to {tech_name} ({tech_id}).",
+        "Initial Access": f"Deploy detection rules for {tech_name} ({tech_id}) — review auth and web server logs.",
+        "Execution": f"Monitor process creation events for {tech_name} ({tech_id}) patterns using auditd or eBPF.",
+        "Persistence": f"Watch for {tech_name} ({tech_id}) by monitoring startup scripts, crontabs, and systemd units.",
+        "Privilege Escalation": f"Track {tech_name} ({tech_id}) via sudo logs, kernel audit, and setuid binary monitoring.",
+        "Defense Evasion": f"Detect {tech_name} ({tech_id}) via file integrity monitoring and syscall auditing.",
+        "Credential Access": f"Monitor access to credential stores and auth subsystems for {tech_name} ({tech_id}).",
+        "Discovery": f"Alert on {tech_name} ({tech_id}) reconnaissance commands via process monitoring.",
+        "Lateral Movement": f"Track {tech_name} ({tech_id}) by analyzing SSH/RDP connection graphs and timing patterns.",
+        "Collection": f"Monitor for {tech_name} ({tech_id}) data staging and collection activity on sensitive hosts.",
+        "Command and Control": f"Deploy network-based detection for {tech_name} ({tech_id}) C2 patterns and beaconing.",
+        "Exfiltration": f"Monitor outbound network traffic volume and destinations for {tech_name} ({tech_id}).",
+        "Impact": f"Create detection rules for {tech_name} ({tech_id}) destructive behavior and impact indicators.",
+    }
+    return tactic_recs.get(tactic, f"Consider adding detection coverage for {tech_name} ({tech_id}).")
+
+
+# ═══════════════════════════════════════════
 # Database
 # ═══════════════════════════════════════════
 

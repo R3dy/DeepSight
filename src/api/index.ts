@@ -7,3 +7,4 @@ export { getClusterStats as getClusterStatsDetailed } from './dashboard';
 export * from './search';
 export * from './syslog';
 export * from './threatIntel';
+export * from './attackCoverage';

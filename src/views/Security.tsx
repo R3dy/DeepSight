@@ -2,18 +2,19 @@ import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getAlerts, acknowledgeAlert, getBeaconing, getAuthEvents, getFileEvents,
-  getSecuritySummary, getSecurityDashboards,
+  getSecuritySummary, getSecurityDashboards, getAttackCoverage,
 } from '../api';
 import { getThreatIntel } from '../api/threatIntel';
 import { getSyslogEvents } from '../api/syslog';
 import {
   AlertSummaryBar, AlertList, BeaconingList, AuthEventsList,
   FileIntegrityTable, SecurityDashboards, ThreatIntelGrid,
-  SyslogViewer, SearchInterface,
+  SyslogViewer, SearchInterface, AttackCoverageHeatmap,
+  CoverageGapAnalysis,
 } from '../components/security';
 import type { Alert } from '../types';
 
-type SecTab = 'overview' | 'search' | 'syslog';
+type SecTab = 'overview' | 'search' | 'syslog' | 'attack';
 
 export function Security() {
   const queryClient = useQueryClient();
@@ -106,6 +107,16 @@ export function Security() {
   });
   const syslogData = syslogResult?.ok ? syslogResult.data : null;
 
+  // ── ATT&CK Coverage ──
+  const { data: coverageResult, isLoading: coverageLoading } = useQuery({
+    queryKey: ['attackCoverage'],
+    queryFn: getAttackCoverage,
+    refetchInterval: paused ? false : 60000,
+    staleTime: 30000,
+    enabled: tab === 'attack',
+  });
+  const coverageData = coverageResult?.ok ? coverageResult.data : null;
+
   // ── Acknowledge ──
   const handleAcknowledge = useCallback(async (id: number) => {
     setAcknowledgedIds(prev => new Set(prev).add(id));
@@ -153,6 +164,7 @@ export function Security() {
           <div className="flex rounded-lg border border-[#30363d] overflow-hidden">
             {([
               { key: 'overview' as const, label: 'Overview', icon: '🛡️' },
+              { key: 'attack' as const, label: 'ATT&CK', icon: '🎯' },
               { key: 'search' as const, label: 'Search', icon: '🔍' },
               { key: 'syslog' as const, label: 'Syslog', icon: '📋' },
             ]).map(t => (
@@ -240,6 +252,25 @@ export function Security() {
               <span className="text-[10px] text-[#8b949e]">Updated every 60s</span>
             </div>
             <ThreatIntelGrid data={tiData} isLoading={tiLoading} isError={tiError} />
+          </div>
+        </div>
+      )}
+
+      {/* ATT&CK Coverage Tab */}
+      {tab === 'attack' && (
+        <div className="space-y-4">
+          {/* Coverage Heatmap */}
+          <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-[#e1e4e8]">🎯 MITRE ATT&amp;CK Coverage Heatmap</h3>
+              <span className="text-[10px] text-[#8b949e]">Updated every 60s</span>
+            </div>
+            <AttackCoverageHeatmap data={coverageData} isLoading={coverageLoading} />
+          </div>
+
+          {/* Gap Analysis */}
+          <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-4">
+            <CoverageGapAnalysis data={coverageData} isLoading={coverageLoading} />
           </div>
         </div>
       )}

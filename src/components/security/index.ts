@@ -7,3 +7,5 @@ export { SecurityDashboards } from './SecurityDashboards';
 export { ThreatIntelGrid } from './ThreatIntelGrid';
 export { SyslogViewer } from './SyslogViewer';
 export { SearchInterface } from './SearchInterface';
+export { AttackCoverageHeatmap } from './AttackCoverageHeatmap';
+export { CoverageGapAnalysis } from './CoverageGapAnalysis';

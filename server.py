@@ -1732,6 +1732,16 @@ def api_security_dashboards():
     return jsonify(data)
 
 
+@app.route("/api/attack-coverage")
+@auth.require_auth
+def api_attack_coverage():
+    """Return MITRE ATT&CK coverage data: all tactics/techniques, coverage
+    status, rule mappings, and gap analysis recommendations."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    return jsonify(detection.get_attack_coverage())
+
+
 @app.route("/api/syslog-events")
 @auth.require_auth
 def api_syslog_events():
