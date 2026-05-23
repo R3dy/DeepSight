@@ -441,3 +441,112 @@ export interface AttackCoverageData {
   total_uncovered: number;
   generated_at: string;
 }
+
+// ── Case Management ──
+export type CaseStatus = 'new' | 'investigating' | 'escalated' | 'resolved' | 'closed';
+export type CaseSeverity = 'critical' | 'high' | 'medium' | 'low';
+export type CasePriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface CaseNote {
+  id: number;
+  incident_id: number;
+  user_id: number | null;
+  username: string;
+  content: string;
+  created_at: string;
+}
+
+export interface CaseIncident {
+  id: number;
+  title: string;
+  description: string;
+  severity: CaseSeverity;
+  status: CaseStatus;
+  priority: CasePriority;
+  assignee_id: number | null;
+  source_host: string;
+  mitre_technique: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolution: string;
+  resolved_note: string;
+  sla_deadline: string | null;
+  sla_breached: boolean;
+  sla_remaining_seconds: number;
+  alert_count: number;
+  alerts?: Alert[];
+  notes?: CaseNote[];
+}
+
+export interface CaseListMeta {
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CaseListResponse {
+  data: CaseIncident[];
+  meta: CaseListMeta;
+}
+
+export interface CaseCreateInput {
+  title: string;
+  description?: string;
+  severity?: CaseSeverity;
+  priority?: CasePriority;
+  source_host?: string;
+  mitre_technique?: string;
+  alert_ids?: number[];
+  tags?: string[];
+}
+
+export interface CaseUpdateInput {
+  status?: CaseStatus;
+  priority?: CasePriority;
+  assignee_id?: number | null;
+  tags?: string[];
+  description?: string;
+  title?: string;
+  resolution?: string;
+  resolved_note?: string;
+}
+
+export interface CaseBulkResult {
+  id: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface CaseBulkResponse {
+  succeeded: number;
+  failed: number;
+  results: CaseBulkResult[];
+}
+
+export interface CaseMetrics {
+  period_days: number;
+  by_severity: Record<CaseSeverity, {
+    count: number;
+    avg_resolution_hours: number;
+    median_resolution_hours: number;
+    p95_resolution_hours: number;
+  }>;
+}
+
+export type CaseSortField = 'created_at' | 'updated_at' | 'severity' | 'status' | 'priority' | 'title' | 'id';
+
+export interface CaseListParams {
+  status?: CaseStatus;
+  severity?: CaseSeverity;
+  priority?: CasePriority;
+  assignee_id?: number;
+  tags?: string;
+  search?: string;
+  host?: string;
+  limit?: number;
+  offset?: number;
+  sort_by?: CaseSortField;
+  sort_dir?: 'asc' | 'desc';
+}

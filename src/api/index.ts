@@ -8,3 +8,4 @@ export * from './search';
 export * from './syslog';
 export * from './threatIntel';
 export * from './attackCoverage';
+export * from './cases';
