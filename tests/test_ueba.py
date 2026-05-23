@@ -2,9 +2,7 @@
 
 import sys
 import os
-import json
 import time
-import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,7 +14,6 @@ class TestBaselineEngine:
         """No alerts fire during the learning period (< LEARNING_SAMPLES)."""
         import detection
         import sqlite3
-        import tempfile
 
         # Use a temporary in-memory DB
         db = sqlite3.connect(":memory:")
@@ -199,6 +196,51 @@ class TestBaselineEngine:
         assert a["metric"] == "cpu_percent"
         assert abs(a["z_score"] - 4.5) < 0.01
         assert a["severity"] == "high"
+
+    def test_zero_variance_small_deviation(self):
+        """Regression: zero-variance data with tiny deviation stays bounded.
+
+        When all values are identical or near-identical, variance approaches
+        zero. The engine should produce z_score ≈ 0 (not magnitude-100
+        false positives from a stddev sentinel of 0.001).
+
+        This test uses a deviation small enough that variance stays below
+        the 1e-9 threshold — exactly the case where the old sentinel bug
+        would inflate z-scores.
+        """
+        import detection
+        import sqlite3
+
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        engine = detection.BaselineEngine.__new__(detection.BaselineEngine)
+        engine.db = db
+        engine.samples = detection.defaultdict(
+            lambda: detection.defaultdict(list))
+        engine.lock = detection.threading.Lock()
+        engine._create_tables()
+
+        host = "test-host"
+        # Feed 60 identical samples — builds zero-variance baseline
+        for i in range(60):
+            engine.update(host, "cpu_percent", 25.0, time.time() + i)
+
+        # Tiny deviation: 0.0001 above baseline keeps variance < 1e-9
+        result = engine.update(host, "cpu_percent", 25.0001, time.time() + 200)
+        assert result is not None
+        z_score, mean, stddev, is_learning = result
+
+        assert not is_learning
+        # With near-zero variance, z-score should be 0 (variance < 1e-9 guard)
+        assert abs(z_score) == 0.0, (
+            f"Zero-variance sentinel should force z=0, got {z_score:.6f}"
+        )
+        assert stddev == 0.0, (
+            f"Stddev should be 0 for zero-variance data, got {stddev:.6f}"
+        )
+        assert abs(mean - 25.0) < 0.01, (
+            f"Mean drifted unexpectedly: {mean:.2f}"
+        )
 
 
 class TestBaselineCollector:
