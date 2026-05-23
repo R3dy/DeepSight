@@ -2697,13 +2697,19 @@ def get_dashboard_data(hours=24):
                 timeline[label] = {}
             timeline[label][r["severity"]] = r["count"]
 
+        sorted_labels = sorted(timeline.keys())
         alert_timeline = {
-            "labels": sorted(timeline.keys()),
-            "critical": [timeline.get(h, {}).get("critical", 0) for h in sorted(timeline.keys())],
-            "high": [timeline.get(h, {}).get("high", 0) for h in sorted(timeline.keys())],
-            "medium": [timeline.get(h, {}).get("medium", 0) for h in sorted(timeline.keys())],
-            "low": [timeline.get(h, {}).get("low", 0) for h in sorted(timeline.keys())],
-            "info": [timeline.get(h, {}).get("info", 0) for h in sorted(timeline.keys())],
+            "labels": sorted_labels,
+            "critical": [timeline.get(h, {}).get("critical", 0) for h in sorted_labels],
+            "high": [timeline.get(h, {}).get("high", 0) for h in sorted_labels],
+            "medium": [timeline.get(h, {}).get("medium", 0) for h in sorted_labels],
+            "low": [timeline.get(h, {}).get("low", 0) for h in sorted_labels],
+            "info": [timeline.get(h, {}).get("info", 0) for h in sorted_labels],
+            "total": sum(
+                timeline.get(h, {}).get(sev, 0)
+                for h in sorted_labels
+                for sev in ("critical", "high", "medium", "low", "info")
+            ),
         }
 
         # ── Top Source IPs (across auth_events and alerts) ──
@@ -2736,6 +2742,7 @@ def get_dashboard_data(hours=24):
         top_source_ips = {
             "labels": [ip for ip, _ in top_ips],
             "counts": [count for _, count in top_ips],
+            "total": sum(count for _, count in top_ips),
         }
 
         # ── MITRE ATT&CK Tactic Distribution ──
@@ -2748,9 +2755,12 @@ def get_dashboard_data(hours=24):
             ORDER BY count DESC
         """, (f"-{hours} hours",)).fetchall()
 
+        mitre_labels = [r["mitre_tactic"] for r in mitre_rows]
+        mitre_counts = [r["count"] for r in mitre_rows]
         mitre_tactics = {
-            "labels": [r["mitre_tactic"] for r in mitre_rows],
-            "counts": [r["count"] for r in mitre_rows],
+            "labels": mitre_labels,
+            "counts": mitre_counts,
+            "total": sum(mitre_counts),
         }
 
         # ── Alert Severity Distribution ──
@@ -2761,9 +2771,12 @@ def get_dashboard_data(hours=24):
             GROUP BY severity
         """, (f"-{hours} hours",)).fetchall()
 
+        sev_labels = [r["severity"] for r in sev_rows]
+        sev_counts_list = [r["count"] for r in sev_rows]
         alert_severity = {
-            "labels": [r["severity"] for r in sev_rows],
-            "counts": [r["count"] for r in sev_rows],
+            "labels": sev_labels,
+            "counts": sev_counts_list,
+            "total": sum(sev_counts_list),
         }
 
         # ── Event Type Distribution ──
@@ -2806,6 +2819,7 @@ def get_dashboard_data(hours=24):
         event_type_distribution = {
             "labels": list(event_counts.keys()),
             "counts": list(event_counts.values()),
+            "total": sum(event_counts.values()),
         }
 
         return {
@@ -2821,11 +2835,11 @@ def get_dashboard_data(hours=24):
     except Exception as e:
         _log(f"get_dashboard_data error: {e}")
         return {
-            "alert_timeline": {"labels": [], "critical": [], "high": [], "medium": [], "low": [], "info": []},
-            "top_source_ips": {"labels": [], "counts": []},
-            "mitre_tactics": {"labels": [], "counts": []},
-            "alert_severity": {"labels": [], "counts": []},
-            "event_type_distribution": {"labels": [], "counts": []},
+            "alert_timeline": {"labels": [], "critical": [], "high": [], "medium": [], "low": [], "info": [], "total": 0},
+            "top_source_ips": {"labels": [], "counts": [], "total": 0},
+            "mitre_tactics": {"labels": [], "counts": [], "total": 0},
+            "alert_severity": {"labels": [], "counts": [], "total": 0},
+            "event_type_distribution": {"labels": [], "counts": [], "total": 0},
             "agent_health": None,
             "hours": hours,
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

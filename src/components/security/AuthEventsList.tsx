@@ -50,7 +50,7 @@ export function AuthEventsList({ events, isLoading }: AuthEventsListProps) {
           <span className="font-medium text-[#e1e4e8] min-w-[60px]">{event.username}</span>
           <span className="text-[#8b949e] text-[10px] truncate max-w-[100px]">{event.source_ip}</span>
           <span className="text-[#6e7681] text-[10px] truncate max-w-[120px]">
-            {event.detail.substring(0, 40)}
+            {event.detail?.substring(0, 40) ?? '—'}
           </span>
           {event.failure_count != null && event.failure_count > 1 && (
             <span className="text-[10px] px-1 py-0.5 rounded bg-[#f43f5e]/15 text-[#f43f5e] font-mono">

@@ -49,8 +49,18 @@ export function SecurityDashboards({ data, isLoading }: SecurityDashboardsProps)
     );
   }
 
+  // ── Safe defaults: each sub-object defaults to an empty shape when undefined ──
+  const safeData = {
+    alert_timeline: data.alert_timeline ?? { labels: [], total: 0 },
+    top_source_ips: data.top_source_ips ?? { labels: [], counts: [], total: 0 },
+    mitre_radar: data.mitre_radar ?? (data as unknown as { mitre_tactics?: SecurityDashboardData['mitre_radar'] }).mitre_tactics ?? { labels: [], counts: [], total: 0 },
+    alert_severity: data.alert_severity ?? { labels: [], counts: [], total: 0 },
+    agent_health: data.agent_health ?? { labels: [], counts: [], total_hosts: 0, host_names: [] },
+    event_distribution: data.event_distribution ?? { labels: [], counts: [], total: 0 },
+  };
+
   // Alert Timeline
-  const tl = data.alert_timeline;
+  const tl = safeData.alert_timeline;
   const tlSeries = (['critical', 'high', 'medium', 'low', 'info'] as const)
     .filter(sev => tl[sev] && (tl[sev] as number[]).some((v: number) => v > 0))
     .map(sev => ({
@@ -62,21 +72,21 @@ export function SecurityDashboards({ data, isLoading }: SecurityDashboardsProps)
     }));
 
   // Top Source IPs
-  const ips = data.top_source_ips;
+  const ips = safeData.top_source_ips;
   const ipsData = (ips.labels ?? []).map((label: string, i: number) => ({
     name: label.length > 18 ? label.substring(0, 17) + '…' : label,
     count: ips.counts?.[i] ?? 0,
   })).slice(0, 10);
 
   // MITRE Radar
-  const mitre = data.mitre_radar;
+  const mitre = safeData.mitre_radar;
   const mitreData = (mitre.labels ?? []).map((label: string, i: number) => ({
     tactic: label,
     count: mitre.counts?.[i] ?? 0,
   }));
 
   // Severity Doughnut
-  const sev = data.alert_severity;
+  const sev = safeData.alert_severity;
   const sevData = (sev.labels ?? []).map((label: string, i: number) => ({
     name: label,
     value: sev.counts?.[i] ?? 0,
@@ -84,7 +94,7 @@ export function SecurityDashboards({ data, isLoading }: SecurityDashboardsProps)
   }));
 
   // Agent Health Doughnut
-  const ah = data.agent_health;
+  const ah = safeData.agent_health;
   const ahColorMap: Record<string, string> = {
     Online: '#22c55e',
     Stale: '#f59e0b',
@@ -98,7 +108,7 @@ export function SecurityDashboards({ data, isLoading }: SecurityDashboardsProps)
   }));
 
   // Event Type Distribution
-  const et = data.event_distribution;
+  const et = safeData.event_distribution;
   const etData = (et.labels ?? []).map((label: string, i: number) => ({
     name: label,
     count: et.counts?.[i] ?? 0,
