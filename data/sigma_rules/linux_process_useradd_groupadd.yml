@@ -1,0 +1,23 @@
+title: New User or Group Creation
+id: 29e0f1a2-b3c4-d5e6-f7a8-b9c0d1e2f3a4
+status: stable
+description: Detects user and group creation commands
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.persistence
+  - attack.t1136
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  sel_useradd:
+    Image|endswith: '/useradd'
+  sel_groupadd:
+    Image|endswith: '/groupadd'
+  sel_adduser:
+    Image|endswith: '/adduser'
+  condition: sel_useradd or sel_groupadd or sel_adduser
+falsepositives:
+  - System administration tasks
+level: medium

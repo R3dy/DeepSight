@@ -1,0 +1,19 @@
+title: Abnormally Long DNS Query
+id: 39c0d1e2-f3a4-b5c6-d7e8-f9a0b1c2d3e4
+status: stable
+description: Detects DNS queries with unusually long domain names
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.command_and_control
+  - attack.t1048
+logsource:
+  category: dns
+  product: linux
+detection:
+  selection:
+    QueryName|re: '^.{40,}$'
+  condition: selection
+falsepositives:
+  - Legitimate services with verbose domain names
+level: low

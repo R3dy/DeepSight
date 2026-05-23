@@ -1,0 +1,20 @@
+title: Reverse Shell via Netcat -e Flag
+id: a7e0e5f0-9c10-4eec-a1c2-96d42f4b467e
+status: stable
+description: Detects netcat reverse shell using the -e execution flag
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/nc'
+    CommandLine|contains: '-e '
+  condition: selection
+falsepositives:
+  - Legitimate use of netcat with -e for remote administration
+level: critical

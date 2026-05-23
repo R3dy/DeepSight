@@ -1,0 +1,20 @@
+title: Reverse Shell via Bash /dev/tcp
+id: 6f2c2fd1-4de0-4ed3-8f96-c1c341d615b1
+status: stable
+description: Detects bash reverse shell connections using /dev/tcp
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/bash'
+    CommandLine|contains: '/dev/tcp/'
+  condition: selection
+falsepositives:
+  - Legitimate scripts that use /dev/tcp for network communication
+level: critical

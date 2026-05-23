@@ -1,0 +1,21 @@
+title: Environment Variable Injection
+id: 48f9a0b1-c2d3-e4f5-a6b7-c8d9e0f1a2b3
+status: stable
+description: Detects suspicious environment variable manipulation
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.privilege_escalation
+  - attack.t1574
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - 'LD_PRELOAD='
+      - 'LD_LIBRARY_PATH='
+  condition: selection
+falsepositives:
+  - Application debugging and development
+level: high

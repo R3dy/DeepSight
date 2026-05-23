@@ -1,0 +1,26 @@
+title: Suspicious Parent Process
+id: 02b3c4d5-e6f7-a8b9-c0d1-e2f3a4b5c6d7
+status: stable
+description: Detects common processes spawned by unusual parent processes
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.privilege_escalation
+  - attack.t1055
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    ParentImage|contains:
+      - 'cron'
+      - 'atd'
+    Image|endswith: '/bash'
+    CommandLine|contains:
+      - '/dev/tcp'
+      - 'curl'
+      - 'wget'
+  condition: selection
+falsepositives:
+  - Scheduled maintenance scripts
+level: high

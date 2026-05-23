@@ -1312,6 +1312,89 @@
     .sec-alerts-list { max-height: 360px; }
     .sec-file-path { max-width: 140px; }
     .sec-ueba-grid { grid-template-columns: 1fr; }
+    .corr-grid { grid-template-columns: 1fr !important; }
+  }
+
+  /* ── Correlation Engine ── */
+  .corr-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .corr-active-list {
+    display: flex; flex-direction: column; gap: 10px;
+    max-height: 280px; overflow-y: auto;
+  }
+  .corr-active-list::-webkit-scrollbar { width: 4px; }
+  .corr-active-list::-webkit-scrollbar-track { background: transparent; }
+  .corr-active-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .corr-chain-card {
+    background: rgba(255,255,255,0.015); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 16px;
+    transition: border-color 0.25s;
+  }
+  .corr-chain-card:hover { border-color: rgba(139,92,246,0.35); }
+  .corr-chain-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; gap: 8px;
+  }
+  .corr-chain-name {
+    font-weight: 600; font-size: 0.72rem;
+  }
+  .corr-chain-host {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--accent-violet);
+  }
+  .corr-chain-time {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.55rem;
+    color: var(--text-muted);
+  }
+  .corr-progress-wrap { margin: 8px 0; }
+  .corr-progress-label {
+    display: flex; justify-content: space-between;
+    font-size: 0.58rem; color: var(--text-muted); margin-bottom: 3px;
+  }
+  .corr-progress-bar {
+    height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.05); overflow: hidden;
+  }
+  .corr-progress-fill {
+    height: 100%; border-radius: 3px; transition: width 0.5s ease;
+  }
+  .corr-severity-badge {
+    display: inline-block; font-size: 0.56rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .corr-severity-badge.critical { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+  .corr-severity-badge.high { background: rgba(249,115,22,0.15); color: var(--accent-orange); }
+  .corr-severity-badge.medium { background: rgba(245,158,11,0.15); color: var(--accent-yellow); }
+  .corr-severity-badge.low { background: rgba(6,182,212,0.15); color: var(--accent-cyan); }
+
+  .corr-completed-table {
+    width: 100%; border-collapse: collapse; font-size: 0.64rem;
+  }
+  .corr-completed-table th {
+    text-align: left; font-size: 0.56rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0 0 8px 0;
+    position: sticky; top: 0; background: var(--bg-card); z-index: 1;
+  }
+  .corr-completed-table td {
+    padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.02);
+    vertical-align: middle;
+  }
+  .corr-completed-table tbody tr { transition: background 0.15s; }
+  .corr-completed-table tbody tr:hover { background: rgba(255,255,255,0.015); }
+  .corr-completed-scroll {
+    max-height: 280px; overflow-y: auto;
+  }
+  .corr-completed-scroll::-webkit-scrollbar { width: 4px; }
+  .corr-completed-scroll::-webkit-scrollbar-track { background: transparent; }
+  .corr-completed-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .corr-step-name {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem;
+    color: var(--text-muted);
   }
 
   /* ── Footer ── */
@@ -1820,6 +1903,45 @@
       </div>
       <div class="sec-anomaly-list" id="sec-anomaly-list">
         <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+      </div>
+    </div>
+
+    <!-- ═══ Correlation Engine ═══ -->
+    <div class="card card-full">
+      <div class="card-header">
+        <span class="card-title">🔗 Attack Chain Correlation</span>
+        <span class="card-badge" id="corr-badge">0 active</span>
+      </div>
+      <div class="corr-grid">
+        <!-- Active Chains -->
+        <div>
+          <div style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
+            ⚡ Active Chains <span id="corr-active-count" style="color:var(--accent-violet)">0</span>
+          </div>
+          <div class="corr-active-list" id="corr-active-list">
+            <div class="sec-loading"><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div><div class="sec-loading-pulse"></div></div>
+          </div>
+        </div>
+        <!-- Completed Chains -->
+        <div>
+          <div style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
+            ✅ Completed Chains <span id="corr-completed-count" style="color:var(--accent-green)">0</span>
+          </div>
+          <div class="corr-completed-scroll">
+            <table class="corr-completed-table">
+              <thead>
+                <tr>
+                  <th>Chain</th>
+                  <th>Host</th>
+                  <th>Severity</th>
+                  <th style="text-align:right">When</th>
+                </tr>
+              </thead>
+              <tbody id="corr-completed-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3843,6 +3965,9 @@ function startSecurityPolling() {
   securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchAnomalies(); }, 10000));
   fetchBaselines();
   fetchAnomalies();
+  // Correlation engine
+  securityPollIntervals.push(setInterval(() => { if (currentView === 'security') fetchCorrelation(); }, 10000));
+  fetchCorrelation();
 }
 
 // ═══════════════════════════════════════════
@@ -4803,6 +4928,90 @@ function fetchVersion() {
     init();
   }
 })();
+
+// ═══════════════════════════════════════════
+// Correlation Engine
+// ═══════════════════════════════════════════
+async function fetchCorrelation() {
+  try {
+    const resp = await fetch('/api/correlation/matches');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderCorrelation(data);
+  } catch (e) { /* silent */ }
+}
+
+function renderCorrelation(data) {
+  const active = data.active || [];
+  const completed = data.completed || [];
+
+  // Update badge
+  document.getElementById('corr-badge').textContent =
+    active.length + ' active · ' + completed.length + ' completed';
+  document.getElementById('corr-active-count').textContent = active.length;
+  document.getElementById('corr-completed-count').textContent = completed.length;
+
+  // ── Active chains ──
+  const activeEl = document.getElementById('corr-active-list');
+  if (!active.length) {
+    activeEl.innerHTML = '<div class="sec-empty"><span class="sec-empty-icon">🔗</span>No active attack chains</div>';
+  } else {
+    activeEl.innerHTML = active.map(a => {
+      const progressPct = a.total_steps > 0
+        ? Math.round((a.step_index / a.total_steps) * 100) : 0;
+      const sevClass = a.severity || 'medium';
+      const progressColor = progressPct >= 100 ? 'var(--accent-red)'
+        : progressPct >= 50 ? 'var(--accent-orange)' : 'var(--accent-yellow)';
+      const stepNames = (a.step_names || []).map((s, i) =>
+        i < a.step_index
+          ? '<span style="color:var(--accent-green)">✓' + s + '</span>'
+          : i === a.step_index
+            ? '<span style="color:var(--accent-yellow);font-weight:700">' + s + '</span>'
+            : '<span style="color:var(--text-muted)">' + s + '</span>'
+      ).join(' → ');
+      const age = relativeTime(a.started_at);
+
+      return `<div class="corr-chain-card">
+        <div class="corr-chain-header">
+          <span class="corr-chain-name">${a.chain_name}</span>
+          <span class="corr-severity-badge ${sevClass}">${a.severity}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span class="corr-chain-host">${a.host}</span>
+          <span class="corr-chain-time">${age}</span>
+        </div>
+        <div class="corr-step-name" style="margin-bottom:6px">${stepNames}</div>
+        <div class="corr-progress-wrap">
+          <div class="corr-progress-label">
+            <span>Step ${a.step_index}/${a.total_steps}</span>
+            <span>${progressPct}%</span>
+          </div>
+          <div class="corr-progress-bar">
+            <div class="corr-progress-fill" style="width:${progressPct}%;background:${progressColor}"></div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Completed chains ──
+  const completedTbody = document.getElementById('corr-completed-tbody');
+  if (!completed.length) {
+    completedTbody.innerHTML =
+      '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:16px">No completed chains</td></tr>';
+  } else {
+    completedTbody.innerHTML = completed.slice(0, 20).map(c => {
+      const sevClass = c.severity || 'high';
+      const time = relativeTime(c.completed_at);
+      return `<tr>
+        <td style="font-weight:600">${c.chain_name}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:var(--accent-violet)">${c.host}</td>
+        <td><span class="corr-severity-badge ${sevClass}">${c.severity}</span></td>
+        <td style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:var(--text-muted)">${time}</td>
+      </tr>`;
+    }).join('');
+  }
+}
 </script>
 
 <div id="version-footer" style="text-align:center;padding:16px 20px 24px;font-size:0.65rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;position:relative;z-index:1">

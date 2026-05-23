@@ -1,0 +1,20 @@
+title: Suspicious Filesystem Mount
+id: 45c6d7e8-f9a0-b1c2-d3e4-f5a6b7c8d9e0
+status: stable
+description: Detects suspicious mount operations
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.defense_evasion
+  - attack.t1562
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/mount'
+    CommandLine|contains: '/tmp'
+  condition: selection
+falsepositives:
+  - Temporary filesystem mounts
+level: low

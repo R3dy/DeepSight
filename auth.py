@@ -34,28 +34,31 @@ try:
     )
     _argon2_available = True
 except ImportError:
-    import hashlib as _hashlib_mod
-    import secrets as _secrets
-
     _argon2_available = False
 
-    def _pbkdf2_hash(password: str) -> str:
-        """Fallback: PBKDF2-SHA256 with 600k iterations."""
-        salt = _secrets.token_bytes(16)
-        dk = _hashlib_mod.pbkdf2_hmac("sha256", password.encode(), salt, 600_000)
-        return f"pbkdf2:sha256:600000${salt.hex()}${dk.hex()}"
+# PBKDF2 fallback: always available (stdlib only), used when hashes use pbkdf2 format
+import hashlib as _hashlib_mod
+import secrets as _secrets
 
-    def _pbkdf2_verify(password: str, stored: str) -> bool:
-        """Verify a PBKDF2-SHA256 hash."""
-        try:
-            _, _, _, rest = stored.split("$", 3)
-            salt_hex, dk_hex = rest.split("$")
-            salt = bytes.fromhex(salt_hex)
-            expected = bytes.fromhex(dk_hex)
-            dk = _hashlib_mod.pbkdf2_hmac("sha256", password.encode(), salt, 600_000)
-            return _secrets.compare_digest(dk, expected)
-        except Exception:
-            return False
+
+def _pbkdf2_hash(password: str) -> str:
+    """Fallback: PBKDF2-SHA256 with 600k iterations."""
+    salt = _secrets.token_bytes(16)
+    dk = _hashlib_mod.pbkdf2_hmac("sha256", password.encode(), salt, 600_000)
+    return f"pbkdf2:sha256:600000${salt.hex()}${dk.hex()}"
+
+
+def _pbkdf2_verify(password: str, stored: str) -> bool:
+    """Verify a PBKDF2-SHA256 hash."""
+    try:
+        # Format: pbkdf2:sha256:600000$salt_hex$dk_hex
+        _, salt_hex, dk_hex = stored.split("$", 2)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(dk_hex)
+        dk = _hashlib_mod.pbkdf2_hmac("sha256", password.encode(), salt, 600_000)
+        return _secrets.compare_digest(dk, expected)
+    except Exception:
+        return False
 
 
 # ── Configuration ──
@@ -168,7 +171,15 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify a password against its hash."""
+    """Verify a password against its hash.
+
+    Checks the hash prefix first so PBKDF2 hashes are verified correctly
+    even when argon2-cffi is installed (which would reject the format).
+    """
+    # PBKDF2 fallback: handle these regardless of argon2 availability
+    if password_hash.startswith("pbkdf2:"):
+        return _pbkdf2_verify(password, password_hash)
+
     if _argon2_available:
         try:
             _ph.verify(password_hash, password)
@@ -181,9 +192,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         except (VerifyMismatchError, VerificationError):
             return False
     else:
-        if password_hash.startswith("pbkdf2:"):
-            return _pbkdf2_verify(password, password_hash)
-        # Unknown hash format
+        # Unknown hash format (argon2 not available and not pbkdf2)
         return False
 
 

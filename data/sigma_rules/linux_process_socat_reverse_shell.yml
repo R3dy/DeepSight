@@ -1,0 +1,22 @@
+title: Reverse Shell via Socat
+id: 25a6b7c8-d9e0-f1a2-b3c4-d5e6f7a8b9c0
+status: stable
+description: Detects socat reverse shell connections
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/socat'
+    CommandLine|contains:
+      - 'EXEC:'
+      - 'TCP:'
+  condition: selection
+falsepositives:
+  - Legitimate network tunneling via socat
+level: critical

@@ -1,0 +1,19 @@
+title: SSH Agent Hijacking
+id: 19a0b1c2-d3e4-f5a6-b7c8-d9e0f1a2b3c4
+status: stable
+description: Detects attempts to hijack SSH agent
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.credential_access
+  - attack.t1563.001
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains: 'SSH_AUTH_SOCK'
+  condition: selection
+falsepositives:
+  - SSH agent forwarding scripts
+level: medium

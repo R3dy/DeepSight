@@ -10,7 +10,52 @@ from flask import Flask, jsonify, send_from_directory, request, g
 
 import auth
 
+# ── API v2 Blueprint ──
+try:
+    from routes.v2 import v2_bp, log_api_audit, _flush_audit_buffer, _ensure_audit_table_lazy
+    _v2_available = True
+except ImportError as e:
+    print(f"[server] WARNING: v2 routes not available: {e}", flush=True)
+    _v2_available = False
+    v2_bp = None  # type: ignore
+
+# ── Flask-SocketIO (optional) ──
+try:
+    from flask_socketio import SocketIO
+
+    _socketio_available = True
+except ImportError:
+    _socketio_available = False
+    SocketIO = None  # type: ignore
+
+# ── React frontend feature flag ──
+_REACT_FRONTEND_ENABLED = os.environ.get("REACT_FRONTEND_ENABLED", "").lower() in ("1", "true", "yes")
+
 app = Flask(__name__, static_folder="static", static_url_path="")
+
+# ── Register API v2 Blueprint ──
+if _v2_available and v2_bp is not None:
+    app.register_blueprint(v2_bp)
+    print("[server] Registered /api/v2/ blueprint", flush=True)
+
+# ── Initialize SocketIO if available ──
+if _socketio_available:
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+    # ── SocketIO event handlers ──
+    @socketio.on('connect')
+    def handle_connect():
+        """Emit a 'connected' event back to the client on successful connection."""
+        from flask import request as sio_request
+        socketio.emit('connected', {'user': 'server'}, to=sio_request.sid)
+
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        """Handle client disconnect (no-op logging placeholder)."""
+        pass
+
+else:
+    socketio = None
 
 # ── Shared secret for agent auth ──
 SHARED_SECRET = os.environ.get("DASHBOARD_SECRET", "sysdash-agent-key-2026")
@@ -1137,7 +1182,20 @@ def collect_outbound_http():
 
 @app.route("/")
 def index():
+    """Serve the frontend: React app if feature flag is set, otherwise legacy SPA."""
+    if _REACT_FRONTEND_ENABLED:
+        dist_index = os.path.join(app.static_folder, "dist", "index.html")
+        if os.path.isfile(dist_index):
+            return send_from_directory(os.path.join(app.static_folder, "dist"), "index.html")
     return send_from_directory("static", "index.html")
+
+
+@app.route("/assets/<path:filename>")
+def react_assets(filename):
+    """Serve React build assets when feature flag is enabled."""
+    if _REACT_FRONTEND_ENABLED:
+        return send_from_directory(os.path.join(app.static_folder, "dist", "assets"), filename)
+    return "Not Found", 404
 
 
 @app.route("/docs/")
@@ -1168,6 +1226,22 @@ def api_stats():
         result = {"host": SELF_HOST, "timestamp": time.time(), **stats}
         if request.args.get("detail") == "true":
             result["deep"] = collect_deep_data()
+
+        # Emit host_stats via SocketIO for real-time frontend updates
+        if _socketio_available and socketio is not None:
+            try:
+                # Emit a compact version (without deep data) to keep events lean
+                socketio.emit('host_stats', {
+                    "host": SELF_HOST,
+                    "timestamp": time.time(),
+                    "memory": stats.get("memory", {}),
+                    "cpu": stats.get("cpu", {}),
+                    "gpu": stats.get("gpu", {}),
+                    "disks": stats.get("disks", []),
+                })
+            except Exception:
+                pass  # best-effort; don't break the HTTP response
+
         return jsonify(result)
 
     # Remote host — return cached
@@ -1204,6 +1278,20 @@ def api_report():
             "stats": stats,
             "status": "online",
         }
+
+    # Emit host_stats via SocketIO for real-time frontend updates
+    if _socketio_available and socketio is not None:
+        try:
+            socketio.emit('host_stats', {
+                "host": host,
+                "timestamp": time.time(),
+                "memory": stats.get("memory", {}),
+                "cpu": stats.get("cpu", {}),
+                "gpu": stats.get("gpu", {}),
+                "disks": stats.get("disks", []),
+            })
+        except Exception:
+            pass  # best-effort
 
     return jsonify({"status": "ok", "host": host})
 
@@ -1536,11 +1624,19 @@ except ImportError as e:
     print(f"[server] WARNING: detection module not available: {e}", flush=True)
     DETECTION_AVAILABLE = False
 
+# Wire up SocketIO for real-time alert emission
+if DETECTION_AVAILABLE and _socketio_available and socketio is not None:
+    detection.set_socketio(socketio)
+    print("[server] SocketIO wired to detection engine for real-time alerts", flush=True)
+
 
 @app.route("/api/alerts")
 @auth.require_auth
 def api_alerts():
-    """Return recent alerts with optional filters."""
+    """Return recent alerts with optional filters.
+
+    Query params: severity, acknowledged, host, category, since, hours, limit
+    """
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
     severity = request.args.get("severity")
@@ -1548,7 +1644,15 @@ def api_alerts():
     acknowledged = None
     if acknowledged_str is not None:
         acknowledged = acknowledged_str.lower() == "true"
-    alerts = detection.get_alerts(severity=severity, acknowledged=acknowledged)
+    host = request.args.get("host")
+    category = request.args.get("category")
+    since = request.args.get("since")
+    hours = request.args.get("hours", 24, type=int)
+    limit = request.args.get("limit", 200, type=int)
+    alerts = detection.get_alerts(
+        hours=hours, severity=severity, acknowledged=acknowledged,
+        host=host, category=category, since=since, limit=limit,
+    )
     return jsonify({"alerts": alerts, "count": len(alerts)})
 
 
@@ -1564,20 +1668,36 @@ def api_beaconing():
 @app.route("/api/auth-events")
 @auth.require_auth
 def api_auth_events():
-    """Return recent auth events with optional type filter."""
+    """Return recent auth events with optional type filter.
+
+    Query params: type, hours, since, limit
+    """
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
     event_type = request.args.get("type")
-    return jsonify({"events": detection.get_auth_events(event_type=event_type)})
+    hours = request.args.get("hours", 1, type=int)
+    since = request.args.get("since")
+    limit = request.args.get("limit", 200, type=int)
+    return jsonify({"events": detection.get_auth_events(
+        hours=hours, event_type=event_type, since=since, limit=limit
+    )})
 
 
 @app.route("/api/file-events")
 @auth.require_auth
 def api_file_events():
-    """Return recent file integrity events."""
+    """Return recent file integrity events with optional path filter.
+
+    Query params: path, hours, limit
+    """
     if not DETECTION_AVAILABLE:
         return jsonify({"error": "detection engine not available"}), 503
-    return jsonify({"events": detection.get_file_events()})
+    path_filter = request.args.get("path")
+    hours = request.args.get("hours", 24, type=int)
+    limit = request.args.get("limit", 200, type=int)
+    return jsonify({"events": detection.get_file_events(
+        hours=hours, path=path_filter, limit=limit
+    )})
 
 
 @app.route("/api/security-summary")
@@ -1601,6 +1721,53 @@ def api_acknowledge_alert():
         return jsonify({"error": "missing alert id"}), 400
     ok = detection.acknowledge_alert(int(alert_id))
     return jsonify({"status": "ok" if ok else "not found", "id": alert_id})
+
+
+@app.route("/api/alerts/acknowledge/bulk", methods=["POST"])
+@auth.require_auth
+def api_acknowledge_alerts_bulk():
+    """Bulk-acknowledge multiple alerts at once.
+
+    POST body: {"alert_ids": [1, 2, 3]}
+    """
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    data = request.get_json(silent=True) or {}
+    alert_ids = data.get("alert_ids", [])
+    if not alert_ids or not isinstance(alert_ids, list):
+        return jsonify({"error": "missing or invalid alert_ids (must be a list)"}), 400
+    result = detection.acknowledge_alerts_bulk([int(a) for a in alert_ids])
+    status_code = 200 if result["failed_ids"] == [] else 207
+    return jsonify(result), status_code
+
+
+@app.route("/api/alerts/export")
+@auth.require_auth
+def api_export_alerts():
+    """Export alerts as CSV or JSON.
+
+    Query params: format (csv|json), hours, severity, host, category, limit
+    """
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    export_format = request.args.get("format", "json").lower()
+    if export_format not in ("json", "csv"):
+        return jsonify({"error": "unsupported format, use 'json' or 'csv'"}), 400
+    hours = request.args.get("hours", 24, type=int)
+    severity = request.args.get("severity")
+    host = request.args.get("host")
+    category = request.args.get("category")
+    limit = request.args.get("limit", 1000, type=int)
+    data_str, content_type, filename = detection.export_alerts(
+        export_format=export_format, hours=hours, severity=severity,
+        host=host, category=category, limit=limit,
+    )
+    from flask import Response
+    return Response(
+        data_str,
+        mimetype=content_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @app.route("/api/alert-stats")
@@ -1637,6 +1804,16 @@ def api_security_dashboards():
     }
 
     return jsonify(data)
+
+
+@app.route("/api/attack-coverage")
+@auth.require_auth
+def api_attack_coverage():
+    """Return MITRE ATT&CK coverage data: all tactics/techniques, coverage
+    status, rule mappings, and gap analysis recommendations."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+    return jsonify(detection.get_attack_coverage())
 
 
 @app.route("/api/syslog-events")
@@ -1766,6 +1943,33 @@ def api_baselines():
             "default_threshold": detection.BASELINE_Z_THRESHOLD,
         },
     })
+
+
+# ═══════════════════════════════════════════
+# Correlation Engine Endpoints
+# ═══════════════════════════════════════════
+
+
+@app.route("/api/correlation/matches")
+@auth.require_auth
+def api_correlation_matches():
+    """Return active and completed attack chain matches."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+
+    host = request.args.get("host")
+    chain_id = request.args.get("chain_id")
+
+    engine = detection.get_correlation_engine()
+    active = engine.get_active_chains(host=host if host else None)
+    completed = engine.get_completed_chains(host=host if host else None)
+
+    # Filter by chain_id if requested
+    if chain_id:
+        active = [a for a in active if a["chain_id"] == chain_id]
+        completed = [c for c in completed if c["chain_id"] == chain_id]
+
+    return jsonify({"active": active, "completed": completed})
 
 
 # ═══════════════════════════════════════════
@@ -1969,6 +2173,137 @@ def _ensure_detection_started():
     _start_detection_if_not_running()
 
 
+# ═══════════════════════════════════════════
+# V2 Auth Guard (before_request)
+# ═══════════════════════════════════════════
+
+@app.before_request
+def _v2_auth_guard():
+    """Ensure all /api/v2/* requests are authenticated.
+
+    All requests to /api/v2/ paths (except health) require a valid Bearer token.
+    This runs before routing, so even non-existent v2 paths return 401 rather
+    than 404, preventing endpoint enumeration.
+
+    Individual routes may additionally apply @auth.require_auth for documentation.
+    """
+    if not request.path.startswith("/api/v2/"):
+        return None
+
+    # Health endpoint is public
+    if request.path == "/api/v2/health" or request.path.startswith("/api/v2/docs"):
+        return None
+
+    # INSECURE_NO_AUTH escape hatch
+    if auth.INSECURE_NO_AUTH:
+        g.current_user = {
+            "user_id": 0,
+            "username": "insecure-mode",
+            "is_admin": True,
+            "scope": "full",
+            "token_type": "insecure",
+        }
+        return None
+
+    token = auth._extract_bearer_token()
+    if not token:
+        return jsonify({"error": "unauthorized", "reason": "missing token"}), 401
+
+    user = auth.validate_token(token)
+    if user is None:
+        # Could be expired or invalid
+        return jsonify({"error": "unauthorized", "reason": "invalid or expired token"}), 401
+
+    g.current_user = user
+    return None
+
+
+# ═══════════════════════════════════════════
+# Security Headers Middleware
+# ═══════════════════════════════════════════
+
+@app.after_request
+def add_security_headers(response):
+    """Add security-related HTTP headers to every response."""
+    # HSTS (only in production with HTTPS)
+    if not app.config.get("TESTING"):
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+    # Referrer policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Permissions policy (restrict browser features)
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=()"
+    )
+    # Remove server identity header
+    response.headers["X-Powered-By"] = ""
+    # Cache control for API responses
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+
+    return response
+
+
+# ═══════════════════════════════════════════
+# Content Security Policy Middleware
+# ═══════════════════════════════════════════
+
+@app.after_request
+def add_csp_header(response):
+    """Add Content-Security-Policy header to HTML responses."""
+    # Only add CSP to HTML responses (not API JSON)
+    content_type = response.headers.get("Content-Type", "")
+    if "text/html" in content_type:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "connect-src 'self' ws://127.0.0.1:* wss://*; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'; "
+        )
+    return response
+
+
+# ═══════════════════════════════════════════
+# V2 Audit Logging Middleware
+# ═══════════════════════════════════════════
+
+@app.after_request
+def v2_audit_logging(response):
+    """Log API v2 requests to the audit trail."""
+    if _v2_available and request.path.startswith("/api/v2/"):
+        try:
+            _ensure_audit_table_lazy()
+            log_api_audit(
+                method=request.method,
+                path=request.path,
+                status_code=response.status_code,
+                duration_ms=0,
+            )
+        except Exception:
+            pass  # Never let audit logging break the response
+    return response
+
+
+@app.teardown_appcontext
+def _flush_audit_on_teardown(error=None):
+    """Flush the audit buffer when a request context ends."""
+    if _v2_available:
+        try:
+            _flush_audit_buffer()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     # Initialize auth database and admin user
     auth.init_auth_db()
@@ -1978,4 +2313,11 @@ if __name__ == "__main__":
     # Start detection collectors immediately in standalone mode
     if DETECTION_AVAILABLE:
         detection.start_collectors()
-    app.run(host="127.0.0.1", port=8451, debug=False)
+
+    # Use SocketIO if available, otherwise plain Flask
+    if _socketio_available and socketio is not None:
+        print(f"[server] Starting with SocketIO on 127.0.0.1:8451 (React frontend: {_REACT_FRONTEND_ENABLED})")
+        socketio.run(app, host="127.0.0.1", port=8451, debug=False, allow_unsafe_werkzeug=True)
+    else:
+        print(f"[server] Starting without SocketIO on 127.0.0.1:8451 (React frontend: {_REACT_FRONTEND_ENABLED})")
+        app.run(host="127.0.0.1", port=8451, debug=False)

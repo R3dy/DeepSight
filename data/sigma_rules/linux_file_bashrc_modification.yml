@@ -1,0 +1,22 @@
+title: Bash Configuration File Modification
+id: 53e4f5a6-b7c8-d9e0-f1a2-b3c4d5e6f7a8
+status: stable
+description: Detects modification of .bashrc or .bash_profile
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.persistence
+  - attack.t1546.004
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|contains:
+      - '.bashrc'
+      - '.bash_profile'
+      - '.profile'
+  condition: selection
+falsepositives:
+  - Users customizing their shell
+level: low

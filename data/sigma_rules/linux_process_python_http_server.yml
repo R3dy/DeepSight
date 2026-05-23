@@ -1,0 +1,22 @@
+title: Python HTTP Server Started
+id: 27c8d9e0-f1a2-b3c4-d5e6-f7a8b9c0d1e2
+status: stable
+description: Detects Python SimpleHTTPServer used for data exfiltration
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.exfiltration
+  - attack.t1041
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+      - '/python3'
+      - '/python'
+    CommandLine|contains: 'SimpleHTTPServer'
+  condition: selection
+falsepositives:
+  - Development and testing
+level: medium

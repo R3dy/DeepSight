@@ -1,0 +1,19 @@
+title: SCP Data Exfiltration
+id: 55a6b7c8-d9e0-f1a2-b3c4-d5e6f7a8b9c0
+status: stable
+description: Detects SCP used for potential data exfiltration
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.exfiltration
+  - attack.t1048
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/scp'
+  condition: selection
+falsepositives:
+  - Legitimate file transfers
+level: low

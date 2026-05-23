@@ -1,0 +1,19 @@
+title: Network Sniffing with tcpdump
+id: 14b5c6d7-e8f9-a0b1-c2d3-e4f5a6b7c8d9
+status: stable
+description: Detects network packet capture using tcpdump
+author: DeepSight Community
+date: 2025/06/01
+tags:
+  - attack.discovery
+  - attack.t1040
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/tcpdump'
+  condition: selection
+falsepositives:
+  - Network administrators troubleshooting
+level: low
