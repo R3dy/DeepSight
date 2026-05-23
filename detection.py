@@ -3273,6 +3273,8 @@ def get_baseline_engine():
 # ═══════════════════════════════════════════
 
 # ── Chain pattern definitions ──
+# Each pattern maps a sequence of alert categories to a MITRE ATT&CK tactic chain.
+# The mitre_chain is a list of (tactic, technique) tuples, one per step.
 CHAIN_PATTERNS = [
     {
         "id": "portscan_sshbrute",
@@ -3282,6 +3284,10 @@ CHAIN_PATTERNS = [
         "steps": [
             {"category": "port_scan", "min_count": 1, "max_gap_seconds": 300},
             {"category": "brute_force", "min_count": 1, "max_gap_seconds": 300},
+        ],
+        "mitre_chain": [
+            ("Reconnaissance", "T1046 (Network Service Discovery)"),
+            ("Credential Access", "T1110 (Brute Force)"),
         ],
     },
     {
@@ -3293,6 +3299,10 @@ CHAIN_PATTERNS = [
             {"category": "auth_failure", "min_count": 3, "max_gap_seconds": 180},
             {"category": "auth_success", "min_count": 1, "max_gap_seconds": 180},
         ],
+        "mitre_chain": [
+            ("Credential Access", "T1110 (Brute Force)"),
+            ("Initial Access", "T1078 (Valid Accounts)"),
+        ],
     },
     {
         "id": "dga_beaconing",
@@ -3302,6 +3312,10 @@ CHAIN_PATTERNS = [
         "steps": [
             {"category": "dga", "min_count": 2, "max_gap_seconds": 600},
             {"category": "beaconing", "min_count": 1, "max_gap_seconds": 600},
+        ],
+        "mitre_chain": [
+            ("Command and Control", "T1568 (Dynamic Resolution)"),
+            ("Command and Control", "T1071 (Application Layer Protocol)"),
         ],
     },
     {
@@ -3314,6 +3328,11 @@ CHAIN_PATTERNS = [
             {"category": "new_process", "min_count": 1, "max_gap_seconds": 120},
             {"category": "outbound_connection", "min_count": 1, "max_gap_seconds": 120},
         ],
+        "mitre_chain": [
+            ("Persistence", "T1098 (Account Manipulation)"),
+            ("Execution", "T1204 (User Execution)"),
+            ("Command and Control", "T1071 (Application Layer Protocol)"),
+        ],
     },
     {
         "id": "threatintel_alertspike",
@@ -3324,10 +3343,62 @@ CHAIN_PATTERNS = [
             {"category": "threat_intel", "min_count": 1, "max_gap_seconds": 60},
             {"category": "alert", "min_count": 3, "max_gap_seconds": 60},
         ],
+        "mitre_chain": [
+            ("Reconnaissance", "T1595 (Active Scanning)"),
+            ("Impact", "T1499 (Endpoint Denial of Service)"),
+        ],
+    },
+    # ── Additional M2 patterns ──
+    {
+        "id": "priv_esc_beacon",
+        "name": "Privilege Escalation → New C2 Beacon",
+        "severity": "critical",
+        "description": "Privilege escalation event (sudo/su) followed by a new outbound C2 beacon within 5 minutes",
+        "steps": [
+            {"category": "privilege_escalation", "min_count": 1, "max_gap_seconds": 300},
+            {"category": "beaconing", "min_count": 1, "max_gap_seconds": 300},
+        ],
+        "mitre_chain": [
+            ("Privilege Escalation", "T1548 (Abuse Elevation Control Mechanism)"),
+            ("Command and Control", "T1071 (Application Layer Protocol)"),
+        ],
+    },
+    {
+        "id": "lateral_movement_chain",
+        "name": "Lateral Movement via SSH → Persistence",
+        "severity": "critical",
+        "description": "SSH success from one host followed by SSH outbound to peer and file modification within 10 minutes",
+        "steps": [
+            {"category": "auth_success", "min_count": 1, "max_gap_seconds": 600},
+            {"category": "new_process", "min_count": 1, "max_gap_seconds": 600},
+            {"category": "file_integrity", "min_count": 1, "max_gap_seconds": 600},
+        ],
+        "mitre_chain": [
+            ("Lateral Movement", "T1021 (Remote Services)"),
+            ("Execution", "T1059 (Command and Scripting Interpreter)"),
+            ("Persistence", "T1098 (Account Manipulation)"),
+        ],
+    },
+    {
+        "id": "exfil_beacon",
+        "name": "C2 Beaconing → Data Exfiltration",
+        "severity": "critical",
+        "description": "Established C2 beacon followed by large outbound connection suggesting data exfiltration within 10 minutes",
+        "steps": [
+            {"category": "beaconing", "min_count": 1, "max_gap_seconds": 600},
+            {"category": "outbound_connection", "min_count": 3, "max_gap_seconds": 600},
+        ],
+        "mitre_chain": [
+            ("Command and Control", "T1071 (Application Layer Protocol)"),
+            ("Exfiltration", "T1041 (Exfiltration Over C2 Channel)"),
+        ],
     },
 ]
 
 EXPIRY_INTERVAL_SECONDS = 60  # how often stale pending matches are cleaned
+EVALUATION_INTERVAL_SECONDS = 10  # periodic evaluation cycle (runs every 10s)
+EVENT_BUFFER_WINDOW_SECONDS = 300  # sliding window for buffered events
+EVENT_BUFFER_MAX_SIZE = 10000  # max events before trimming oldest
 
 
 class CorrelationEngine:
@@ -3336,6 +3407,10 @@ class CorrelationEngine:
     Detects multi-stage attack chains by matching sequences of individual alerts
     against predefined CHAIN_PATTERNS. Tracks partial matches per (host, chain_id)
     and creates correlation alerts when all steps are satisfied.
+
+    Maintains a sliding-window event buffer (default 300s) for batch evaluation
+    via a periodic evaluation thread (default 10s interval). Each pattern maps to
+    a MITRE ATT&CK tactic chain for accurate threat intelligence attribution.
     """
 
     def __init__(self, db_conn):
@@ -3344,11 +3419,15 @@ class CorrelationEngine:
         # _pending: {(host, chain_id): {step_index, started_at, last_match_at, step_counts}}
         self._pending = {}
         self._pending_lock = threading.Lock()
+        # Sliding window event buffer: list of (timestamp, alert_dict)
+        self._event_buffer = []
+        self._event_buffer_lock = threading.Lock()
+        self._eval_thread = None
         self._expiry_thread = None
         self._running = False
 
     def start(self):
-        """Start the background expiry thread if not already running."""
+        """Start the background expiry and evaluation threads if not already running."""
         if self._running:
             return
         self._running = True
@@ -3356,10 +3435,14 @@ class CorrelationEngine:
             target=self._expire_loop, name="correlation-expiry", daemon=True
         )
         self._expiry_thread.start()
-        _log("CorrelationEngine started (expiry thread running)")
+        self._eval_thread = threading.Thread(
+            target=self._evaluate_loop, name="correlation-eval", daemon=True
+        )
+        self._eval_thread.start()
+        _log("CorrelationEngine started (expiry + eval threads running)")
 
     def stop(self):
-        """Signal the expiry thread to stop."""
+        """Signal background threads to stop."""
         self._running = False
 
     def process_alert(self, alert):
@@ -3372,6 +3455,9 @@ class CorrelationEngine:
         if not alert:
             return
 
+        # ── Buffer event in sliding window for periodic evaluation ──
+        self._buffer_event(alert)
+
         host = alert.get("source_host", "") or alert.get("source_ip", "")
         if not host:
             return
@@ -3380,11 +3466,12 @@ class CorrelationEngine:
         now = time.time()
 
         with self._pending_lock:
+            # ── Pass 1: advance or complete existing pending chains ──
+            advanced = False
             for pattern in self.patterns:
                 chain_id = pattern["id"]
                 key = (host, chain_id)
 
-                # ── Check for existing partial match ──
                 if key in self._pending:
                     p = self._pending[key]
                     needed_step = pattern["steps"][p["step_index"]]
@@ -3398,31 +3485,50 @@ class CorrelationEngine:
 
                         if p["step_index"] >= len(pattern["steps"]):
                             self._check_completion(key, pattern, p)
-                        return
+                        advanced = True
                     else:
                         # Wrong step — check if we're still within gap for current step
-                        current_step = pattern["steps"][p["step_index"]]
                         time_since_last = now - p["last_match_at"]
-                        if time_since_last > current_step["max_gap_seconds"]:
-                            # Expired — start fresh
+                        if time_since_last > needed_step["max_gap_seconds"]:
+                            # Expired — remove stale pending
                             del self._pending[key]
-                        else:
-                            # Still waiting for current step — no match on this category
-                            continue
 
-                # ── Check if this alert starts a new chain ──
-                if pattern["steps"][0]["category"] == category:
-                    self._pending[key] = {
-                        "step_index": 0,
-                        "started_at": now,
-                        "last_match_at": now,
-                        "step_counts": {category: 1},
-                    }
-                    first_step = pattern["steps"][0]
-                    if first_step["min_count"] <= 1:
-                        self._pending[key]["step_index"] = 1
-                        if self._pending[key]["step_index"] >= len(pattern["steps"]):
-                            self._check_completion(key, pattern, self._pending[key])
+            # ── Pass 2: start new chains only if nothing was advanced ──
+            if not advanced:
+                for pattern in self.patterns:
+                    chain_id = pattern["id"]
+                    key = (host, chain_id)
+
+                    # Skip if already tracked
+                    if key in self._pending:
+                        continue
+
+                    if pattern["steps"][0]["category"] == category:
+                        self._pending[key] = {
+                            "step_index": 0,
+                            "started_at": now,
+                            "last_match_at": now,
+                            "step_counts": {category: 1},
+                        }
+                        first_step = pattern["steps"][0]
+                        if first_step["min_count"] <= 1:
+                            self._pending[key]["step_index"] = 1
+                            if self._pending[key]["step_index"] >= len(pattern["steps"]):
+                                self._check_completion(key, pattern, self._pending[key])
+
+    def _buffer_event(self, alert):
+        """Add an alert to the sliding window event buffer, pruning stale entries."""
+        now = time.time()
+        cutoff = now - EVENT_BUFFER_WINDOW_SECONDS
+        with self._event_buffer_lock:
+            self._event_buffer.append((now, alert))
+            # Prune events outside the window
+            self._event_buffer[:] = [
+                (ts, a) for ts, a in self._event_buffer if ts > cutoff
+            ]
+            # Trim to max size to prevent unbounded growth
+            if len(self._event_buffer) > EVENT_BUFFER_MAX_SIZE:
+                self._event_buffer = self._event_buffer[-EVENT_BUFFER_MAX_SIZE:]
 
     def _check_completion(self, key, pattern, pending):
         """All steps matched — persist the chain and create a correlation alert."""
@@ -3432,13 +3538,13 @@ class CorrelationEngine:
 
         # Persist to DB
         steps_json = json.dumps(list(pending["step_counts"].items()))
+        started_ts = datetime.fromtimestamp(started_at, timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        completed_ts = datetime.fromtimestamp(completed_at, timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         try:
-            started_ts = datetime.fromtimestamp(started_at, timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            completed_ts = datetime.fromtimestamp(completed_at, timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
             self.db.execute(
                 """INSERT INTO correlation_matches
                    (chain_id, chain_name, host, started_at, completed_at,
@@ -3462,26 +3568,39 @@ class CorrelationEngine:
         except Exception as e:
             _log(f"CorrelationEngine _check_completion DB error: {e}")
 
-        # Create a correlation alert
+        # Build MITRE ATT&CK tactic chain from pattern
+        mitre_chain = pattern.get("mitre_chain", [])
+        mitre_tactics = ", ".join(t[0] for t in mitre_chain) if mitre_chain else "Command and Control"
+        mitre_techniques = ", ".join(t[1] for t in mitre_chain) if mitre_chain else "T1071 (Application Layer Protocol)"
+
+        # Build rich description with attack chain detail
+        chain_description = pattern.get("description", "")
+        if mitre_chain:
+            tactic_steps = " → ".join(t[0] for t in mitre_chain)
+            chain_description += f"\nMITRE ATT&CK Chain: {tactic_steps}"
+            chain_description += f"\nTechniques: {mitre_techniques}"
+
+        # Create a correlation alert with pattern-specific MITRE mappings
         create_alert(
             severity=pattern["severity"],
             category="correlation",
             title=f"Attack Chain: {pattern['name']}",
-            description=pattern.get("description", ""),
+            description=chain_description,
             source_host=host,
-            mitre_tactic="Command and Control",
-            mitre_technique="T1071 (Application Layer Protocol)",
+            mitre_tactic=mitre_tactics,
+            mitre_technique=mitre_techniques,
             raw_data={
                 "chain_id": chain_id,
                 "host": host,
                 "started_at": started_ts,
                 "completed_at": completed_ts,
                 "steps": pending["step_counts"],
+                "mitre_chain": mitre_chain,
             },
         )
 
-        # Clear pending
-        del self._pending[key]
+        # Clear pending (if it exists — may not when called from eval thread)
+        self._pending.pop(key, None)
 
     def _expire_pending(self):
         """Remove stale partial matches whose last step gap has expired."""
@@ -3513,6 +3632,124 @@ class CorrelationEngine:
             except Exception as e:
                 _log(f"CorrelationEngine expiry error: {e}")
             time.sleep(EXPIRY_INTERVAL_SECONDS)
+
+    def _evaluate_loop(self):
+        """Background thread: periodically evaluate buffered events every 10s.
+
+        Replays buffered events against all chain patterns to catch chains that
+        may have been missed in the event-driven path (e.g., due to race conditions
+        or out-of-order delivery). Run interval: EVALUATION_INTERVAL_SECONDS (10s).
+        """
+        _log(f"CorrelationEngine: evaluation loop started (interval={EVALUATION_INTERVAL_SECONDS}s, "
+             f"buffer_window={EVENT_BUFFER_WINDOW_SECONDS}s)")
+        while self._running:
+            try:
+                self._evaluate_buffered_events()
+            except Exception as e:
+                _log(f"CorrelationEngine evaluation error: {e}")
+            time.sleep(EVALUATION_INTERVAL_SECONDS)
+
+    def _evaluate_buffered_events(self):
+        """Re-evaluate all buffered events against chain patterns.
+
+        This is a batch evaluation that re-processes events in the sliding window
+        against all chain patterns. It complements the event-driven path (process_alert)
+        by catching chains that may have been missed due to timing or ordering issues.
+        """
+        with self._event_buffer_lock:
+            # Get a snapshot of buffered events, sorted by time
+            events = sorted(self._event_buffer, key=lambda x: x[0])
+
+        if not events:
+            return
+
+        now = time.time()
+        cutoff = now - EVENT_BUFFER_WINDOW_SECONDS
+
+        # Only process events within the window
+        window_events = [a for ts, a in events if ts > cutoff]
+        if not window_events:
+            return
+
+        # For each pattern, look for a complete sequence in the buffered events
+        with self._pending_lock:
+            for pattern in self.patterns:
+                chain_id = pattern["id"]
+                steps = pattern["steps"]
+
+                # Group events by host
+                host_events = {}
+                for alert in window_events:
+                    host = alert.get("source_host", "") or alert.get("source_ip", "")
+                    if not host:
+                        continue
+                    if host not in host_events:
+                        host_events[host] = []
+                    host_events[host].append(alert)
+
+                for host, alerts in host_events.items():
+                    key = (host, chain_id)
+
+                    # Skip if this chain is already completed or actively tracked
+                    if key not in self._pending:
+                        # Try to match the full sequence from scratch
+                        si = 0  # step index
+                        step_counts = {}
+                        last_ts = None
+
+                        for alert in alerts:
+                            category = alert.get("category", "")
+                            if si >= len(steps):
+                                break
+
+                            needed = steps[si]
+                            if needed["category"] == category:
+                                step_counts[category] = step_counts.get(category, 0) + 1
+                                # Extract timestamp from alert or use now
+                                alert_ts = now  # fallback
+                                last_ts = alert_ts
+
+                                if step_counts[category] >= needed["min_count"]:
+                                    si += 1
+
+                        if si >= len(steps) and last_ts is not None:
+                            # Full chain matched from buffered events
+                            pending = {
+                                "step_index": si,
+                                "started_at": last_ts,
+                                "last_match_at": last_ts,
+                                "step_counts": step_counts,
+                            }
+                            # Temporarily add to pending so _check_completion can clean up
+                            self._pending[key] = pending
+                            self._check_completion(key, pattern, pending)
+
+    def get_buffered_events(self, host=None, category=None, limit=100):
+        """Return events currently in the sliding window buffer.
+
+        Parameters:
+            host: optional filter by source_host or source_ip
+            category: optional filter by alert category
+            limit: max results to return
+
+        Returns:
+            list of alert dicts with an added `buffered_at` timestamp
+        """
+        with self._event_buffer_lock:
+            result = []
+            for ts, alert in self._event_buffer:
+                if host:
+                    ah = alert.get("source_host", "") or alert.get("source_ip", "")
+                    if ah != host:
+                        continue
+                if category and alert.get("category") != category:
+                    continue
+                alert_copy = dict(alert)
+                alert_copy["buffered_at"] = ts
+                result.append(alert_copy)
+                if len(result) >= limit:
+                    break
+            return result
 
     def get_active_chains(self, host=None):
         """Return list of in-progress chain matches.

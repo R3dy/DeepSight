@@ -287,3 +287,251 @@ def test_threatintel_alertspike_chain(fresh_engine):
     completed = engine.get_completed_chains(host=host)
     assert len(completed) == 1
     assert completed[0]["chain_id"] == "threatintel_alertspike"
+
+
+# ── Test 13: Correlation alert has MITRE ATT&CK tactic chain from pattern ──
+def test_correlation_alert_has_mitre_chain(fresh_engine, monkeypatch):
+    """Correlation alert created by _check_completion uses pattern's mitre_chain."""
+    engine = fresh_engine
+
+    # Intercept create_alert to inspect the correlation alert
+    captured = []
+    import detection
+    original_create = detection.create_alert
+
+    def fake_create(**kwargs):
+        captured.append(kwargs)
+        return {"id": 999, "acknowledged": False}
+
+    monkeypatch.setattr(detection, "create_alert", fake_create)
+
+    # Trigger portscan_sshbrute chain (critical, mitre_chain: Reconnaissance → Credential Access)
+    engine.process_alert(make_alert("port_scan", source_ip="10.0.30.1"))
+    engine.process_alert(make_alert("brute_force", source_ip="10.0.30.1"))
+
+    assert len(captured) == 1
+    corr_alert = captured[0]
+    assert corr_alert["category"] == "correlation"
+    assert corr_alert["severity"] == "critical"
+    assert "Reconnaissance" in corr_alert["mitre_tactic"]
+    assert "Credential Access" in corr_alert["mitre_tactic"]
+    assert "T1046" in corr_alert["mitre_technique"]
+    assert "T1110" in corr_alert["mitre_technique"]
+    assert "MITRE ATT&CK Chain:" in corr_alert["description"]
+    assert "Reconnaissance → Credential Access" in corr_alert["description"]
+    raw = corr_alert.get("raw_data", {})
+    assert "mitre_chain" in raw
+    assert len(raw["mitre_chain"]) == 2
+
+
+# ── Test 14: Sliding window event buffer stores events ──
+def test_event_buffer_stores_events(fresh_engine):
+    """After processing alerts, they appear in the sliding window buffer."""
+    engine = fresh_engine
+
+    engine.process_alert(make_alert("port_scan", source_ip="10.0.40.1"))
+    engine.process_alert(make_alert("brute_force", source_ip="10.0.40.1"))
+    engine.process_alert(make_alert("dga", source_ip="10.0.40.2"))
+
+    buffered = engine.get_buffered_events()
+    assert len(buffered) >= 3
+    assert all("buffered_at" in e for e in buffered)
+
+
+# ── Test 15: Buffer host filter works ──
+def test_event_buffer_host_filter(fresh_engine):
+    """get_buffered_events filters by host correctly."""
+    engine = fresh_engine
+
+    engine.process_alert(make_alert("port_scan", source_ip="10.0.41.1"))
+    engine.process_alert(make_alert("brute_force", source_ip="10.0.41.2"))
+
+    filtered = engine.get_buffered_events(host="10.0.41.1")
+    assert len(filtered) == 1
+    assert filtered[0]["category"] == "port_scan"
+
+
+# ── Test 16: Buffer category filter works ──
+def test_event_buffer_category_filter(fresh_engine):
+    """get_buffered_events filters by category correctly."""
+    engine = fresh_engine
+
+    engine.process_alert(make_alert("port_scan", source_ip="10.0.42.1"))
+    engine.process_alert(make_alert("brute_force", source_ip="10.0.42.1"))
+
+    filtered = engine.get_buffered_events(category="port_scan")
+    assert len(filtered) == 1
+    assert filtered[0]["category"] == "port_scan"
+
+
+# ── Test 17: Periodic evaluation replays buffered events ──
+def test_periodic_evaluation_detects_chain(fresh_engine):
+    """_evaluate_buffered_events replays events and detects complete chains."""
+    engine = fresh_engine
+
+    # Feed events into buffer only (bypass event-driven matching by
+    # manually adding to buffer without triggering process_alert logic)
+    import time
+    now = time.time()
+    with engine._event_buffer_lock:
+        engine._event_buffer = [
+            (now - 60,  make_alert("port_scan", source_ip="10.0.50.1")),
+            (now - 30,  make_alert("brute_force", source_ip="10.0.50.1")),
+        ]
+
+    # Run periodic evaluation
+    engine._evaluate_buffered_events()
+
+    # Should have detected the portscan_sshbrute chain
+    completed = engine.get_completed_chains(host="10.0.50.1")
+    assert len(completed) == 1
+    assert completed[0]["chain_id"] == "portscan_sshbrute"
+
+
+# ── Test 18: Priv ESC → Beacon chain (new M2 pattern) ──
+def test_priv_esc_beacon_chain(fresh_engine):
+    """privilege_escalation followed by beaconing triggers priv_esc_beacon pattern."""
+    engine = fresh_engine
+
+    host = "10.0.60.1"
+    engine.process_alert(make_alert("privilege_escalation", source_ip=host))
+    assert len(engine._pending) == 1
+
+    active = engine.get_active_chains(host=host)
+    assert active[0]["chain_id"] == "priv_esc_beacon"
+    assert active[0]["step_index"] == 1
+
+    engine.process_alert(make_alert("beaconing", source_ip=host))
+    assert len(engine._pending) == 0
+
+    completed = engine.get_completed_chains(host=host)
+    assert len(completed) == 1
+    assert completed[0]["chain_id"] == "priv_esc_beacon"
+    assert completed[0]["severity"] == "critical"
+
+
+# ── Test 19: Lateral movement chain (3-step) ──
+def test_lateral_movement_chain(fresh_engine):
+    """auth_success → new_process → file_integrity triggers lateral_movement_chain."""
+    engine = fresh_engine
+
+    host = "10.0.70.1"
+    engine.process_alert(make_alert("auth_success", source_ip=host))
+    assert len(engine._pending) == 1
+
+    active = engine.get_active_chains(host=host)
+    assert active[0]["chain_id"] == "lateral_movement_chain"
+
+    engine.process_alert(make_alert("new_process", source_ip=host))
+    active = engine.get_active_chains(host=host)
+    assert active[0]["step_index"] == 2
+
+    engine.process_alert(make_alert("file_integrity", source_ip=host))
+    assert len(engine._pending) == 0
+
+    completed = engine.get_completed_chains(host=host)
+    assert len(completed) == 1
+    assert completed[0]["chain_id"] == "lateral_movement_chain"
+
+
+# ── Test 20: Exfil beacon chain (multi-count step 2) ──
+def test_exfil_beacon_chain(fresh_engine):
+    """beaconing + 3 outbound_connections triggers exfil_beacon pattern."""
+    engine = fresh_engine
+
+    host = "10.0.80.1"
+    engine.process_alert(make_alert("beaconing", source_ip=host))
+    assert len(engine._pending) == 1
+
+    active = engine.get_active_chains(host=host)
+    assert active[0]["chain_id"] == "exfil_beacon"
+
+    # Step 2 needs 3 outbound_connection alerts
+    engine.process_alert(make_alert("outbound_connection", source_ip=host))
+    engine.process_alert(make_alert("outbound_connection", source_ip=host))
+    active = engine.get_active_chains(host=host)
+    assert active[0]["step_index"] == 1
+    assert active[0]["step_counts"].get("outbound_connection", 0) == 2
+
+    engine.process_alert(make_alert("outbound_connection", source_ip=host))
+    assert len(engine._pending) == 0
+
+    completed = engine.get_completed_chains(host=host)
+    assert len(completed) == 1
+    assert completed[0]["chain_id"] == "exfil_beacon"
+
+
+# ── Test 21: All 8 patterns have MITRE chains ──
+def test_all_patterns_have_mitre_chains():
+    """Every chain pattern must have a mitre_chain matching its step count."""
+    import detection
+    for pattern in detection.CHAIN_PATTERNS:
+        assert "mitre_chain" in pattern, f"{pattern['id']} missing mitre_chain"
+        mitre = pattern["mitre_chain"]
+        assert len(mitre) == len(pattern["steps"]), (
+            f"{pattern['id']}: mitre_chain length {len(mitre)} != steps {len(pattern['steps'])}"
+        )
+        for tactic, technique in mitre:
+            assert isinstance(tactic, str) and len(tactic) > 0
+            assert isinstance(technique, str) and len(technique) > 0
+
+
+# ── Test 22: Buffer prunes events outside 300s window ──
+def test_buffer_prunes_old_events(fresh_engine):
+    """Events older than 300s are pruned from the sliding window."""
+    engine = fresh_engine
+    import time
+
+    now = time.time()
+
+    # Inject old event directly into buffer
+    with engine._event_buffer_lock:
+        engine._event_buffer = [
+            (now - 400, make_alert("port_scan", source_ip="10.0.90.1")),
+            (now - 200, make_alert("brute_force", source_ip="10.0.90.1")),
+            (now - 50,  make_alert("dga", source_ip="10.0.90.2")),
+        ]
+
+    # Buffer a new event — triggers pruning
+    engine.process_alert(make_alert("threat_intel", source_ip="10.0.90.3"))
+
+    buffered = engine.get_buffered_events()
+    # The 400s-old event should be pruned
+    assert len(buffered) <= 3  # at most 3 (400s-old is pruned)
+    # The 400s event should not be present
+    hosts_in_buffer = {e.get("source_ip", "") for e in buffered}
+    assert "10.0.90.1" in hosts_in_buffer  # the 200s event keeps this host
+
+
+# ── Test 23: Buffer respects max size limit ──
+def test_buffer_max_size(fresh_engine):
+    """Buffer is trimmed when it exceeds EVENT_BUFFER_MAX_SIZE."""
+    engine = fresh_engine
+    import time
+    import detection
+
+    now = time.time()
+    max_size = detection.EVENT_BUFFER_MAX_SIZE
+
+    # Fill buffer past max
+    with engine._event_buffer_lock:
+        engine._event_buffer = [
+            (now - i, make_alert("port_scan", source_ip=f"10.0.{i}.1"))
+            for i in range(max_size + 500)
+        ]
+
+    # Trigger pruning via new event
+    engine.process_alert(make_alert("brute_force", source_ip="10.0.99.1"))
+
+    with engine._event_buffer_lock:
+        assert len(engine._event_buffer) <= max_size
+
+
+# ── Test 24: Correlation engine is importable ──
+def test_correlation_engine_importable():
+    """detection module exposes CorrelationEngine and get_correlation_engine."""
+    import detection
+    assert hasattr(detection, "CorrelationEngine")
+    assert hasattr(detection, "get_correlation_engine")
+    assert hasattr(detection, "CHAIN_PATTERNS")
+    assert len(detection.CHAIN_PATTERNS) >= 8
