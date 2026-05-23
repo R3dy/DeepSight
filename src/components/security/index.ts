@@ -9,3 +9,5 @@ export { SyslogViewer } from './SyslogViewer';
 export { SearchInterface } from './SearchInterface';
 export { AttackCoverageHeatmap } from './AttackCoverageHeatmap';
 export { CoverageGapAnalysis } from './CoverageGapAnalysis';
+export { EnrichmentPanel } from './EnrichmentPanel';
+export { PlaybookHistory } from './PlaybookHistory';
