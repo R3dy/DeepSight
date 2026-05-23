@@ -196,7 +196,7 @@ def v2_status():
             "status": "operational",
             "timestamp": time.time(),
             "features": {
-                "cases": "planned",
+                "cases": "available",
                 "hunt": "planned",
                 "iocs": "planned",
                 "dashboards": "planned",
@@ -224,6 +224,7 @@ import routes.v2.docs  # noqa: E402, F401 — registers /docs/ and /openapi.json
 import routes.v2.detection  # noqa: E402, F401 — registers /detection/ and /sigma/ routes
 import routes.v2.ueba  # noqa: E402, F401 — registers /ueba/ health and model-status routes
 import routes.v2.incidents  # noqa: E402, F401 — registers /incidents/ grouping routes
+import routes.v2.cases  # noqa: E402, F401 — registers /cases/ management routes
 
 
 def _ensure_audit_table_lazy():
