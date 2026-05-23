@@ -3,7 +3,6 @@
 import sys
 import os
 import time
-import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -346,7 +345,6 @@ class TestAnomalyDetector:
     def test_collect_and_train(self):
         """AnomalyDetector collects samples and trains IsolationForest."""
         import detection
-        import numpy as np
 
         detector = detection.AnomalyDetector(
             contamination=0.1, min_samples=30,
@@ -376,7 +374,6 @@ class TestAnomalyDetector:
     def test_predict_normal(self):
         """Normal samples score close to 1 (inlier)."""
         import detection
-        import numpy as np
 
         detector = detection.AnomalyDetector(
             contamination=0.1, min_samples=30,
@@ -409,7 +406,6 @@ class TestAnomalyDetector:
     def test_predict_anomaly(self):
         """Anomalous samples score close to -1 (outlier)."""
         import detection
-        import numpy as np
 
         detector = detection.AnomalyDetector(
             contamination=0.1, min_samples=30,
@@ -461,8 +457,6 @@ class TestAnomalyDetector:
     def test_model_persistence(self):
         """Model can be saved and loaded from disk."""
         import detection
-        import tempfile
-        import numpy as np
 
         detector1 = detection.AnomalyDetector(
             contamination=0.1, min_samples=30,
@@ -609,7 +603,6 @@ class TestAnomalyDetectorHealthEndpoint:
     def test_health_endpoint_response(self):
         """Health endpoint returns proper JSON structure."""
         import detection
-        import server
 
         # We test get_ueba_health() directly, not via HTTP
         # Use a fresh detector to avoid interference

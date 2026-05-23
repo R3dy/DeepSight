@@ -14,9 +14,9 @@ Routes:
   GET    /api/v2/incidents/stats         — incident statistics
 """
 
-from flask import jsonify, request, g
+from flask import jsonify, request
 
-from routes.v2 import v2_bp, auth, log_api_audit, require_permission
+from routes.v2 import v2_bp, auth, log_api_audit
 
 
 # ── Helper: get the alert grouper ──

@@ -22,8 +22,6 @@ Routes:
   GET  /api/v2/ueba/export                    — export UEBA data
 """
 
-import time
-import threading
 
 from flask import jsonify, request, g
 

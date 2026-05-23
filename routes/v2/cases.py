@@ -24,15 +24,13 @@ SLA deadlines by severity:
 """
 
 import json
-import os
 import sqlite3
 import threading
-import time
 from datetime import datetime, timezone, timedelta
 
 from flask import jsonify, request, g
 
-from routes.v2 import v2_bp, auth, log_api_audit, require_permission
+from routes.v2 import v2_bp, auth, log_api_audit
 
 # ═══════════════════════════════════════════
 # Status Workflow Definition

@@ -1,7 +1,0 @@
-{
-  "feature": "search-ui",
-  "title": "Advanced search & investigation interface",
-  "description": "FTS5 full-text search with field-level query syntax",
-  "phase": 2,
-  "timestamp": 1779410814.528871
-}

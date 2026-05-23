@@ -15,7 +15,6 @@ import detection
 def fresh_engine():
     """Create a fresh CorrelationEngine with no pending state."""
     import sqlite3
-    import tempfile
 
     db = sqlite3.connect(":memory:", check_same_thread=False)
     db.row_factory = sqlite3.Row
@@ -297,7 +296,6 @@ def test_correlation_alert_has_mitre_chain(fresh_engine, monkeypatch):
     # Intercept create_alert to inspect the correlation alert
     captured = []
     import detection
-    original_create = detection.create_alert
 
     def fake_create(**kwargs):
         captured.append(kwargs)
@@ -546,7 +544,6 @@ def test_reentrant_lock_no_deadlock(fresh_engine, monkeypatch):
     with threading.Lock this would deadlock."""
     engine = fresh_engine
     import detection
-    import threading
 
     # Verify the lock is a reentrant lock (RLock/_thread.RLock)
     lock_type = type(engine._pending_lock)
@@ -558,7 +555,6 @@ def test_reentrant_lock_no_deadlock(fresh_engine, monkeypatch):
     # Mock _correlate_alert to call engine.process_alert directly
     # (the real _correlate_alert already does this; we just need create_alert
     # to actually invoke the callback path)
-    original_correlate = detection._correlate_alert
 
     def real_correlate(alert_dict):
         # Simulate the real call chain: process_alert acquires _pending_lock

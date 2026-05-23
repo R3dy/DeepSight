@@ -70,7 +70,7 @@ def fresh_grouper():
     db.commit()
 
     # Insert a few test alerts
-    now = time.time()
+    time.time()
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for i in range(1, 6):
@@ -829,7 +829,7 @@ class TestDetectionIntegration:
         grouper.process_alert(alert)
 
         # Verify the grouping worked by checking incidents
-        incidents = grouper.get_incidents()
+        grouper.get_incidents()
         # Incident may or may not have been created depending on existing state
         # Just verify process_alert didn't crash
         assert True  # no exception = success
