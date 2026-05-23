@@ -171,12 +171,25 @@ function PlaybookCard({ result }: { result: PlaybookResult }) {
   );
 }
 
+/** Validate an IP or domain input (basic client-side check) */
+function validateIpOrDomain(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed) return true; // empty is fine (optional field)
+  // IP pattern
+  const ipv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+  const ipv6 = /^[a-fA-F0-9:]+$/;
+  // Domain pattern (allow punycode, hyphens, dots)
+  const domain = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+  return ipv4.test(trimmed) || ipv6.test(trimmed) || domain.test(trimmed);
+}
+
 /** Manual enrichment trigger */
 function ManualTrigger({ alertId }: { alertId?: number }) {
   const [selectedPb, setSelectedPb] = useState('');
   const [manualIp, setManualIp] = useState('');
   const [running, setRunning] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
+  const [validationError, setValidationError] = useState('');
 
   const { data: pbsResult } = useQuery({
     queryKey: ['playbooks'],
@@ -187,6 +200,13 @@ function ManualTrigger({ alertId }: { alertId?: number }) {
 
   const handleRun = useCallback(async () => {
     if (!selectedPb) return;
+
+    // Validate input
+    if (manualIp.trim() && !validateIpOrDomain(manualIp)) {
+      setValidationError('Invalid IP or domain format');
+      return;
+    }
+    setValidationError('');
     setRunning(true);
     setResultMsg('');
 
@@ -227,9 +247,9 @@ function ManualTrigger({ alertId }: { alertId?: number }) {
         <input
           type="text"
           value={manualIp}
-          onChange={e => setManualIp(e.target.value)}
+          onChange={e => { setManualIp(e.target.value); setValidationError(''); }}
           placeholder="IP or domain (optional)"
-          className="text-xs bg-[#161b22] border border-[#30363d] rounded px-2 py-1 text-[#e1e4e8] w-40"
+          className={`text-xs bg-[#161b22] border rounded px-2 py-1 text-[#e1e4e8] w-40 ${validationError ? 'border-[#f85149]' : 'border-[#30363d]'}`}
         />
         <button
           type="button"
@@ -240,6 +260,9 @@ function ManualTrigger({ alertId }: { alertId?: number }) {
           {running ? 'Running…' : 'Run'}
         </button>
       </div>
+      {validationError && (
+        <p className="text-xs mt-2 text-[#f85149]">{validationError}</p>
+      )}
       {resultMsg && (
         <p className={`text-xs mt-2 ${resultMsg.startsWith('✓') ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
           {resultMsg}
