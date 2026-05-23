@@ -1814,6 +1814,33 @@ def api_baselines():
 
 
 # ═══════════════════════════════════════════
+# Correlation Engine Endpoints
+# ═══════════════════════════════════════════
+
+
+@app.route("/api/correlation/matches")
+@auth.require_auth
+def api_correlation_matches():
+    """Return active and completed attack chain matches."""
+    if not DETECTION_AVAILABLE:
+        return jsonify({"error": "detection engine not available"}), 503
+
+    host = request.args.get("host")
+    chain_id = request.args.get("chain_id")
+
+    engine = detection.get_correlation_engine()
+    active = engine.get_active_chains(host=host if host else None)
+    completed = engine.get_completed_chains(host=host if host else None)
+
+    # Filter by chain_id if requested
+    if chain_id:
+        active = [a for a in active if a["chain_id"] == chain_id]
+        completed = [c for c in completed if c["chain_id"] == chain_id]
+
+    return jsonify({"active": active, "completed": completed})
+
+
+# ═══════════════════════════════════════════
 # Authentication API Endpoints
 # ═══════════════════════════════════════════
 
