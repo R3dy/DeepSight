@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* ── DeepSight Dark Theme ── */
+@theme {
+  --color-bg-primary: #0f1117;
+  --color-bg-secondary: #161b22;
+  --color-bg-tertiary: #1c2129;
+  --color-bg-elevated: #21262d;
+  --color-border-default: #30363d;
+  --color-border-muted: #21262d;
+  --color-text-primary: #e1e4e8;
+  --color-text-secondary: #8b949e;
+  --color-text-muted: #6e7681;
+  --color-accent-violet: #a78bfa;
+  --color-accent-violet-dim: #7c3aed;
+  --color-accent-cyan: #22d3ee;
+  --color-accent-cyan-dim: #0891b2;
+  --color-accent-amber: #f59e0b;
+  --color-accent-amber-dim: #d97706;
+  --color-accent-rose: #f43f5e;
+  --color-accent-rose-dim: #e11d48;
+  --color-accent-green: #22c55e;
+  --color-accent-green-dim: #15803d;
+  --color-severity-critical: #dc2626;
+  --color-severity-high: #ea580c;
+  --color-severity-medium: #f59e0b;
+  --color-severity-low: #3b82f6;
+  --color-severity-info: #6b7280;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Base styles ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid var(--color-accent-cyan);
+  outline-offset: 2px;
+}
+
+/* ── Selection ── */
+::selection {
+  background-color: rgba(167, 139, 250, 0.3);
+  color: var(--color-text-primary);
+}

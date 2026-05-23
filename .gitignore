@@ -5,6 +5,7 @@ data/alerts.db
 data/alerts.db-shm
 data/alerts.db-wal
 static/docs/
+static/dist/
 node_modules/
 .DS_Store
 *.log

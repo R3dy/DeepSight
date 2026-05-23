@@ -10,7 +10,39 @@ from flask import Flask, jsonify, send_from_directory, request, g
 
 import auth
 
+# ── API v2 Blueprint ──
+try:
+    from routes.v2 import v2_bp, log_api_audit, _flush_audit_buffer, _ensure_audit_table_lazy
+    _v2_available = True
+except ImportError as e:
+    print(f"[server] WARNING: v2 routes not available: {e}", flush=True)
+    _v2_available = False
+    v2_bp = None  # type: ignore
+
+# ── Flask-SocketIO (optional) ──
+try:
+    from flask_socketio import SocketIO
+
+    _socketio_available = True
+except ImportError:
+    _socketio_available = False
+    SocketIO = None  # type: ignore
+
+# ── React frontend feature flag ──
+_REACT_FRONTEND_ENABLED = os.environ.get("REACT_FRONTEND_ENABLED", "").lower() in ("1", "true", "yes")
+
 app = Flask(__name__, static_folder="static", static_url_path="")
+
+# ── Register API v2 Blueprint ──
+if _v2_available and v2_bp is not None:
+    app.register_blueprint(v2_bp)
+    print("[server] Registered /api/v2/ blueprint", flush=True)
+
+# ── Initialize SocketIO if available ──
+if _socketio_available:
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+else:
+    socketio = None
 
 # ── Shared secret for agent auth ──
 SHARED_SECRET = os.environ.get("DASHBOARD_SECRET", "sysdash-agent-key-2026")
@@ -1137,7 +1169,20 @@ def collect_outbound_http():
 
 @app.route("/")
 def index():
+    """Serve the frontend: React app if feature flag is set, otherwise legacy SPA."""
+    if _REACT_FRONTEND_ENABLED:
+        dist_index = os.path.join(app.static_folder, "dist", "index.html")
+        if os.path.isfile(dist_index):
+            return send_from_directory(os.path.join(app.static_folder, "dist"), "index.html")
     return send_from_directory("static", "index.html")
+
+
+@app.route("/assets/<path:filename>")
+def react_assets(filename):
+    """Serve React build assets when feature flag is enabled."""
+    if _REACT_FRONTEND_ENABLED:
+        return send_from_directory(os.path.join(app.static_folder, "dist", "assets"), filename)
+    return "Not Found", 404
 
 
 @app.route("/docs/")
@@ -1969,6 +2014,137 @@ def _ensure_detection_started():
     _start_detection_if_not_running()
 
 
+# ═══════════════════════════════════════════
+# V2 Auth Guard (before_request)
+# ═══════════════════════════════════════════
+
+@app.before_request
+def _v2_auth_guard():
+    """Ensure all /api/v2/* requests are authenticated.
+
+    All requests to /api/v2/ paths (except health) require a valid Bearer token.
+    This runs before routing, so even non-existent v2 paths return 401 rather
+    than 404, preventing endpoint enumeration.
+
+    Individual routes may additionally apply @auth.require_auth for documentation.
+    """
+    if not request.path.startswith("/api/v2/"):
+        return None
+
+    # Health endpoint is public
+    if request.path == "/api/v2/health" or request.path.startswith("/api/v2/docs"):
+        return None
+
+    # INSECURE_NO_AUTH escape hatch
+    if auth.INSECURE_NO_AUTH:
+        g.current_user = {
+            "user_id": 0,
+            "username": "insecure-mode",
+            "is_admin": True,
+            "scope": "full",
+            "token_type": "insecure",
+        }
+        return None
+
+    token = auth._extract_bearer_token()
+    if not token:
+        return jsonify({"error": "unauthorized", "reason": "missing token"}), 401
+
+    user = auth.validate_token(token)
+    if user is None:
+        # Could be expired or invalid
+        return jsonify({"error": "unauthorized", "reason": "invalid or expired token"}), 401
+
+    g.current_user = user
+    return None
+
+
+# ═══════════════════════════════════════════
+# Security Headers Middleware
+# ═══════════════════════════════════════════
+
+@app.after_request
+def add_security_headers(response):
+    """Add security-related HTTP headers to every response."""
+    # HSTS (only in production with HTTPS)
+    if not app.config.get("TESTING"):
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+    # Referrer policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Permissions policy (restrict browser features)
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=()"
+    )
+    # Remove server identity header
+    response.headers["X-Powered-By"] = ""
+    # Cache control for API responses
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+
+    return response
+
+
+# ═══════════════════════════════════════════
+# Content Security Policy Middleware
+# ═══════════════════════════════════════════
+
+@app.after_request
+def add_csp_header(response):
+    """Add Content-Security-Policy header to HTML responses."""
+    # Only add CSP to HTML responses (not API JSON)
+    content_type = response.headers.get("Content-Type", "")
+    if "text/html" in content_type:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "connect-src 'self' ws://127.0.0.1:* wss://*; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'; "
+        )
+    return response
+
+
+# ═══════════════════════════════════════════
+# V2 Audit Logging Middleware
+# ═══════════════════════════════════════════
+
+@app.after_request
+def v2_audit_logging(response):
+    """Log API v2 requests to the audit trail."""
+    if _v2_available and request.path.startswith("/api/v2/"):
+        try:
+            _ensure_audit_table_lazy()
+            log_api_audit(
+                method=request.method,
+                path=request.path,
+                status_code=response.status_code,
+                duration_ms=0,
+            )
+        except Exception:
+            pass  # Never let audit logging break the response
+    return response
+
+
+@app.teardown_appcontext
+def _flush_audit_on_teardown(error=None):
+    """Flush the audit buffer when a request context ends."""
+    if _v2_available:
+        try:
+            _flush_audit_buffer()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     # Initialize auth database and admin user
     auth.init_auth_db()
@@ -1978,4 +2154,11 @@ if __name__ == "__main__":
     # Start detection collectors immediately in standalone mode
     if DETECTION_AVAILABLE:
         detection.start_collectors()
-    app.run(host="127.0.0.1", port=8451, debug=False)
+
+    # Use SocketIO if available, otherwise plain Flask
+    if _socketio_available and socketio is not None:
+        print(f"[server] Starting with SocketIO on 127.0.0.1:8451 (React frontend: {_REACT_FRONTEND_ENABLED})")
+        socketio.run(app, host="127.0.0.1", port=8451, debug=False, allow_unsafe_werkzeug=True)
+    else:
+        print(f"[server] Starting without SocketIO on 127.0.0.1:8451 (React frontend: {_REACT_FRONTEND_ENABLED})")
+        app.run(host="127.0.0.1", port=8451, debug=False)
