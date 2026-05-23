@@ -4246,7 +4246,7 @@ class CorrelationEngine:
         self.patterns = CHAIN_PATTERNS
         # _pending: {(host, chain_id): {step_index, started_at, last_match_at, step_counts}}
         self._pending = {}
-        self._pending_lock = threading.Lock()
+        self._pending_lock = threading.RLock()
         # Sliding window event buffer: list of (timestamp, alert_dict)
         self._event_buffer = []
         self._event_buffer_lock = threading.Lock()
@@ -4541,6 +4541,22 @@ class CorrelationEngine:
                                     si += 1
 
                         if si >= len(steps) and last_ts is not None:
+                            # Dedup: skip if this chain+host was already completed
+                            # within the buffer window (prevents duplicate rows on
+                            # every 10s periodic evaluation cycle).
+                            try:
+                                existing = self.db.execute(
+                                    """SELECT id FROM correlation_matches
+                                       WHERE chain_id = ? AND host = ?
+                                       AND completed_at >= datetime('now', ?)
+                                       LIMIT 1""",
+                                    (chain_id, host, f'-{EVENT_BUFFER_WINDOW_SECONDS} seconds'),
+                                ).fetchone()
+                                if existing:
+                                    continue
+                            except Exception:
+                                pass  # DB check is best-effort
+
                             # Full chain matched from buffered events
                             pending = {
                                 "step_index": si,

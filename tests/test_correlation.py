@@ -535,3 +535,143 @@ def test_correlation_engine_importable():
     assert hasattr(detection, "get_correlation_engine")
     assert hasattr(detection, "CHAIN_PATTERNS")
     assert len(detection.CHAIN_PATTERNS) >= 8
+
+
+# ── Test 25: RLock prevents deadlock when _evaluate_buffered_events
+#              re-enters process_alert via create_alert → _correlate_alert ──
+def test_reentrant_lock_no_deadlock(fresh_engine, monkeypatch):
+    """_evaluate_buffered_events holds _pending_lock and calls _check_completion
+    which calls create_alert which calls _correlate_alert which calls
+    process_alert which re-acquires _pending_lock. With RLock this is safe;
+    with threading.Lock this would deadlock."""
+    engine = fresh_engine
+    import detection
+    import threading
+
+    # Verify the lock is a reentrant lock (RLock/_thread.RLock)
+    lock_type = type(engine._pending_lock)
+    # RLock returns _thread.RLock; Lock returns _thread.lock
+    assert 'RLock' in lock_type.__name__, (
+        f"_pending_lock must be reentrant (RLock), got {lock_type.__name__}"
+    )
+
+    # Mock _correlate_alert to call engine.process_alert directly
+    # (the real _correlate_alert already does this; we just need create_alert
+    # to actually invoke the callback path)
+    original_correlate = detection._correlate_alert
+
+    def real_correlate(alert_dict):
+        # Simulate the real call chain: process_alert acquires _pending_lock
+        engine.process_alert(alert_dict)
+
+    monkeypatch.setattr(detection, "_correlate_alert", real_correlate)
+
+    now = time.time()
+    # Inject events that form a complete chain into the buffer
+    with engine._event_buffer_lock:
+        engine._event_buffer = [
+            (now - 60, make_alert("port_scan", source_ip="10.0.100.1")),
+            (now - 30, make_alert("brute_force", source_ip="10.0.100.1")),
+        ]
+
+    # This must NOT deadlock. With threading.Lock it would hang forever.
+    # Use a timeout via a monitor thread to catch any deadlock.
+    result = [False]
+    exception = [None]
+
+    def run_eval():
+        try:
+            engine._evaluate_buffered_events()
+            result[0] = True
+        except Exception as e:
+            exception[0] = e
+
+    eval_thread = detection.threading.Thread(target=run_eval)
+    eval_thread.start()
+    eval_thread.join(timeout=5)  # 5s timeout — deadlock would cause hang
+
+    assert eval_thread.is_alive() is False, (
+        "DEADLOCK: _evaluate_buffered_events hung — "
+        "_pending_lock is NOT reentrant"
+    )
+    if exception[0] is not None:
+        raise exception[0]
+    assert result[0] is True, "_evaluate_buffered_events did not complete"
+
+    # Verify the chain was detected
+    completed = engine.get_completed_chains(host="10.0.100.1")
+    assert len(completed) == 1
+    assert completed[0]["chain_id"] == "portscan_sshbrute"
+
+
+# ── Test 26: Periodic evaluation does not create duplicate matches ──
+def test_periodic_evaluation_dedup(fresh_engine):
+    """After a chain is completed via event-driven path, re-running
+    _evaluate_buffered_events should NOT create a duplicate match."""
+    engine = fresh_engine
+
+    # First, complete the chain via the event-driven path
+    host = "10.0.110.1"
+    engine.process_alert(make_alert("port_scan", source_ip=host))
+    engine.process_alert(make_alert("brute_force", source_ip=host))
+
+    # Chain should be completed
+    completed = engine.get_completed_chains(host=host)
+    assert len(completed) == 1
+    assert completed[0]["chain_id"] == "portscan_sshbrute"
+
+    # Now inject the same events into the buffer and run periodic evaluation
+    now = time.time()
+    with engine._event_buffer_lock:
+        engine._event_buffer = [
+            (now - 60, make_alert("port_scan", source_ip=host)),
+            (now - 30, make_alert("brute_force", source_ip=host)),
+        ]
+
+    engine._evaluate_buffered_events()
+
+    # Should still have only ONE match — no duplicates
+    completed_after = engine.get_completed_chains(host=host)
+    assert len(completed_after) == 1, (
+        f"Expected 1 match, got {len(completed_after)}. "
+        "Periodic evaluation created duplicate correlation_matches rows."
+    )
+    assert completed_after[0]["chain_id"] == "portscan_sshbrute"
+
+
+# ── Test 27: Periodic evaluation dedup works across multiple cycles ──
+def test_periodic_evaluation_dedup_multi_cycle(fresh_engine):
+    """Multiple calls to _evaluate_buffered_events with the same buffered
+    events should NOT create duplicate matches on each call."""
+    engine = fresh_engine
+
+    host = "10.0.120.1"
+    now = time.time()
+
+    # Inject events that form a complete chain into the buffer (without
+    # going through process_alert, so the event-driven path doesn't fire)
+    with engine._event_buffer_lock:
+        engine._event_buffer = [
+            (now - 60, make_alert("port_scan", source_ip=host)),
+            (now - 30, make_alert("brute_force", source_ip=host)),
+        ]
+
+    # First evaluation: should detect and create the match
+    engine._evaluate_buffered_events()
+    completed = engine.get_completed_chains(host=host)
+    assert len(completed) == 1
+
+    # Second evaluation with same events still in buffer: should NOT duplicate
+    engine._evaluate_buffered_events()
+    completed_after = engine.get_completed_chains(host=host)
+    assert len(completed_after) == 1, (
+        f"Expected 1 match after two cycles, got {len(completed_after)}. "
+        "Second _evaluate_buffered_events created a duplicate."
+    )
+
+    # Third evaluation: still no duplicates
+    engine._evaluate_buffered_events()
+    completed_final = engine.get_completed_chains(host=host)
+    assert len(completed_final) == 1, (
+        f"Expected 1 match after three cycles, got {len(completed_final)}."
+    )
