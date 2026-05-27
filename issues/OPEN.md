@@ -5,6 +5,19 @@
 
 ---
 
+## GLM-MODEL-001 — Pending: GLM-4.7-Flash model file re-download
+
+**Escalation resolved:** 2026-05-22 13:49 CDT
+**Root cause:** Model file `GLM-4.7-Flash-UD-Q3_K_XL.gguf` missing from `/models/`. Container kept loading Qwen3.6-35B instead → OOM crash loop. Royce stopped container and disabled restart to break cycle.
+
+**What needs to happen:** Re-download `GLM-4.7-Flash-UD-Q3_K_XL.gguf` to `/models/`, then re-enable and restart the `llama-server` container on port 8010.
+
+**Why it's stuck:** Needs Royce to initiate the re-download (model source unknown to me; file is large). Container restart is blocked until the model file exists.
+
+**Related:** `escalations.llama-server-wrong-model` in `heartbeat-state.json` (resolved: true, but root fix incomplete).
+
+---
+
 ## DS-001 — Rename sysdash-agent → deep-scout (docs + code)
 
 **Reported:** 2026-05-21 13:42 CDT by Royce | **Priority:** Medium
