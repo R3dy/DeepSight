@@ -18,6 +18,28 @@
 
 ---
 
+## SYSDASH-001 — SysDash: No systemd watchdog, process dies silently (recurring)
+
+**Formalized:** 2026-05-28 from recurring auto-recovery events (May 19/20/21/22/26/28) | **Priority:** High
+
+**Exact symptoms:** `python3 server.py` dies silently. No systemd unit or supervisor. No watchdog to restart it. Process stays dead until a heartbeat catches it or Royce manually restarts.
+
+**Root cause:** `server.py` runs as a bare `nohup python3 server.py &` process — no supervisor, no restart policy.
+
+**Permanent fix needed:** Create a systemd unit file for `sysdash.service`:
+- Type: simple
+- ExecStart: `python3 /home/royce/apps/ram-dashboard/server.py`
+- Restart: always
+- WorkingDirectory: `/home/royce/apps/ram-dashboard`
+- Environment: `DEEPSIGHT_INSECURE_NO_AUTH=true` (or proper auth config)
+- User: royce
+
+**Files needed:** `/etc/systemd/system/sysdash.service`
+
+**Recovery history:** May 19 (10.5h downtime), May 20 (9h), May 22 (multiple), May 26 (~4 days silent death), May 28 (stale socket, process dead)
+
+---
+
 ## DS-001 — Rename sysdash-agent → deep-scout (docs + code)
 
 **Reported:** 2026-05-21 13:42 CDT by Royce | **Priority:** Medium
